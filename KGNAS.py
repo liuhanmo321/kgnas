@@ -1,6 +1,7 @@
 import pandas as pd 
 import torch 
 import torch_geometric
+import numpy as np
 import networkx as nx
 import os
 import json
@@ -11,7 +12,7 @@ from .model.ModelDescription import ModelDescription
 BENCH_DATASET_NAME = ['cora', 'citeseer', 'pubmed', 'cs', 'physics', 'photo', 'computers', 'arxiv', 'proteins']
 
 class KGNAS:
-    def __init__(self, kg_dir='./KG/'):
+    def __init__(self, kg_dir='./KG/', numerical_weight=0.5):
         self.dataset_desc = DatasetDescription()
         self.model_desc = ModelDescription()
         self.KG = nx.Graph()
@@ -20,7 +21,10 @@ class KGNAS:
 
         self.entities = []
 
-    def calculate_dataset_similarity(self, target_dataset_name):
+        self.numerical_weight = numerical_weight
+        self.categorical_weight = 1 - numerical_weight
+
+    def calculate_dataset_similarity(self, target_dataset_name, sim_metric='gower'):
         # uniary similarity: a vector of decimal numbers for each of the statistical values.
         temp_df = self.dataset_desc.uniary_info.copy(deep=True)
         numerical_columns = temp_df.select_dtypes(include=['number']).columns
@@ -29,23 +33,23 @@ class KGNAS:
             temp_df[col] = self.process_numerical_data(temp_df[col])
 
         # two-ary similarity: a vector of 0s and 1s.
-        relations = self.dataset_desc.two_ary_info['relation'].unique()
-        for relation in relations:
+        categorical_columns = self.dataset_desc.two_ary_info['relation'].unique()
+        for relation in categorical_columns:
             temp_df[relation] = 0
 
             relation_df = self.dataset_desc.two_ary_info[self.dataset_desc.two_ary_info['relation'] == relation]
             target_entity = relation_df[relation_df['source_entity'] == target_dataset_name]['target_entity'].values[0]
             temp_df[relation] = (relation_df['target_entity'] == target_entity).astype(int)
-        
+
         dataset_similarities = {'dataset': [], 'dataset_similarity': []}
         temp_df.set_index('Dataset', inplace=True)
-        target_vector = temp_df.loc[target_dataset_name].to_numpy()
+        target_vector = temp_df.loc[target_dataset_name]
         for dataset in BENCH_DATASET_NAME:
-            bench_vector = temp_df.loc[dataset].to_numpy()
+            bench_vector = temp_df.loc[dataset]
             dataset_similarities['dataset'].append(dataset)
-            dataset_similarities['dataset_similarity'].append(1 - self.pairwise_similarity(target_vector, bench_vector, sim_metric='mse'))
+            dataset_similarities['dataset_similarity'].append(self.pairwise_similarity(target_vector, bench_vector, sim_metric=sim_metric, numerical_columns=numerical_columns, categorical_columns=categorical_columns))
 
-        print(dataset_similarities)
+        # print(dataset_similarities)
         
         dataset_similarities_df = pd.DataFrame(dataset_similarities)
         dataset_similarities_df.sort_values(by=['dataset_similarity'], ascending=False, inplace=True)
@@ -55,8 +59,8 @@ class KGNAS:
     def calculate_model_similarity(self):
         pass
     
-    def get_similar_dataset(self, target_dataset_name, top_k=5):
-        dataset_similarities_df = self.calculate_dataset_similarity(target_dataset_name)
+    def get_similar_dataset(self, target_dataset_name, top_k=5, sim_metric='gower'):
+        dataset_similarities_df = self.calculate_dataset_similarity(target_dataset_name, sim_metric=sim_metric)
 
         return dataset_similarities_df.head(top_k)
     
@@ -165,8 +169,49 @@ class KGNAS:
         column = (column - column.min()) / (column.max() - column.min())
         return column
     
-    def pairwise_similarity(self, target_vector, bench_vector, sim_metric='cosine'):
+    def pairwise_similarity(self, target_vector, bench_vector, sim_metric='gower', numerical_columns=None, categorical_columns=None):
         if sim_metric == 'cosine':
-            return torch.nn.functional.cosine_similarity(torch.tensor(target_vector), torch.tensor(bench_vector)).item()
-        if sim_metric == 'mse':
-            return torch.nn.functional.mse_loss(torch.tensor(target_vector), torch.tensor(bench_vector)).item()
+            return torch.nn.functional.cosine_similarity(torch.tensor(target_vector.to_numpy()), torch.tensor(bench_vector.to_numpy())).item()
+        if sim_metric == 'l2':
+            return 1 - torch.nn.functional.mse_loss(torch.tensor(target_vector.to_numpy()), torch.tensor(bench_vector.to_numpy())).item()
+        if sim_metric == 'l1':
+            return 1 - torch.nn.functional.l1_loss(torch.tensor(target_vector.to_numpy()), torch.tensor(bench_vector.to_numpy())).item()
+        if sim_metric == 'gower':
+
+            target_num_vector = target_vector[numerical_columns].to_numpy()
+            target_cat_vector = target_vector[categorical_columns].to_numpy()
+
+            bench_num_vector = bench_vector[numerical_columns].to_numpy()
+            bench_cat_vector = bench_vector[categorical_columns].to_numpy()
+
+            def dice_similarity(a, b):
+                """
+                Dice distance between to 0/1 vectors
+
+                params:
+                a (np.array): the first binary vector
+                b (np.array): the second binary vector
+
+                return:
+                float: Dice distance
+                """
+                assert np.array_equal(a, a.astype(bool)), "Must be binary vector (0/1)"
+                assert np.array_equal(b, b.astype(bool)), "Must be binary vector (0/1)"
+
+                # Compute the intersections and the nums of 0s and 1s
+                intersection = np.sum(a * b)
+                a_sum = np.sum(a)
+                b_sum = np.sum(b)
+
+                # Compute the Dice distance
+                dice_similarity = (2.0 * intersection) / (a_sum + b_sum)
+                # dice_distance = 1 - dice_similarity
+
+                return dice_similarity
+            
+            numerical_similarity = np.mean(1 - np.abs(target_num_vector - bench_num_vector))
+            categorical_similarity = dice_similarity(target_cat_vector, bench_cat_vector)
+            
+            similarity = self.numerical_weight * numerical_similarity + self.categorical_weight * categorical_similarity
+            
+            return similarity

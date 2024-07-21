@@ -90,6 +90,8 @@ class ModelDescription:
         self.bench_df = self._read_bench_data()
         self.model_structure_df = self._decompose_model()
 
+        self.relation_names = None
+        
         self.prepare_knowledge_graph()
 
     
@@ -101,6 +103,11 @@ class ModelDescription:
 
     def prepare_knowledge_graph(self):
         # non_performance_columns = self.bench_df.columns.difference(performance_columns)
+        self.relation_names = {}
+        self.relation_names['hyper_param'] = [key for key in HYPER_PARAM.keys() if key != 'dataset']
+        self.relation_names['hardware'] = [key for key in HARDWARE.keys() if key != 'dataset']
+        self.relation_names['performance'] = [col for col in self.bench_df.columns if col not in ['dataset', 'model']]
+        self.relation_names['structure'] = [col for col in self.model_structure_df.columns if col not in ['dataset', 'model']]
 
         data_model_df = self.bench_df.copy(deep=True)
         data_model_df = pd.merge(data_model_df, self.model_structure_df, on='model', how='left')
@@ -120,13 +127,17 @@ class ModelDescription:
         self.uniary_info = pd.concat([data_model_df['model'], self.uniary_info], axis=1)
 
         # Two-ary information
-        # self.two_ary_info = data_model_df[non_performance_columns].select_dtypes(include=['object']).copy(deep=True)
-        # self.two_ary_info = pd.concat([data_model_df['model'], self.two_ary_info], axis=1)
         temp_two_ary_info = data_model_df[non_performance_columns].select_dtypes(include=['object']).copy(deep=True)
         self.two_ary_info = pd.DataFrame()
         for col in temp_two_ary_info.columns:
+            relation = 'has_' + col.replace(' ', '_')
+            for relation_type in self.relation_names.keys():
+                if col in self.relation_names[relation_type]:
+                    self.relation_names[relation_type].remove(col)
+                    self.relation_names[relation_type].append(relation)
+
             temp_df = pd.concat([data_model_df['model'], temp_two_ary_info[col]], axis=1)
-            temp_df['relation'] = 'has_' + col.replace(' ', '_')
+            temp_df['relation'] = relation
             temp_df.rename(columns={col: 'target_entity', 'model': 'source_entity'}, inplace=True)
             self.two_ary_info = pd.concat([self.two_ary_info, temp_df])
 
@@ -134,17 +145,6 @@ class ModelDescription:
         self.hyper_relation_info = data_model_df[['dataset', 'model'] + performance_columns].copy(deep=True)
         self.hyper_relation_info.rename(columns={'dataset': 'source_entity', 'model': 'target_entity'}, inplace=True)
         self.hyper_relation_info['relation'] = 'has_performance'
-
-        # self.two_ary_info = self.model_structure_df[['model', 'struct_topology']].copy(deep=True)
-
-        # self.two_ary_info = self.two_ary_info.rename(columns={"model": "entity_1", "struct_topology": "entity_2"})
-        # self.two_ary_info["relation"] = "Has_Topology"
-
-        # for i in range(1,5):
-        #     temp_df = self.model_structure_df[['model', f'struct_{i}']].rename(columns={"model": "entity_1", f'struct_{i}': "entity_2"})
-        #     temp_df["relation"] = f"Has_Layer_{i}_Structure"
-        #     self.two_ary_info = pd.concat([self.two_ary_info, temp_df])
-
 
     def _read_bench_data(self):
         dnames = ['cora', 'citeseer', 'pubmed', 'cs', 'physics', 'photo', 'computers', 'arxiv', 'proteins']

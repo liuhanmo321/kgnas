@@ -8,6 +8,7 @@ import json
 
 from .dataset.DatasetDescription import DatasetDescription
 from .model.ModelDescription import ModelDescription
+from nas_bench_graph import Arch
 
 BENCH_DATASET_NAME = ['cora', 'citeseer', 'pubmed', 'cs', 'physics', 'photo', 'computers', 'arxiv', 'proteins']
 
@@ -58,7 +59,7 @@ class KGNAS:
 
     def calculate_model_similarity(self, source_model_data: pd.Series, candidate_df: pd.DataFrame, sim_metric='gower'):
 
-        print(source_model_data)
+        # print(source_model_data)
         source_model_data = pd.Series(source_model_data)
         source_model_data['model'] = 'source_model'
 
@@ -72,31 +73,26 @@ class KGNAS:
                 continue
             
             if temp_df[col].dtype == 'object':
-                temp_df[col] = (temp_df[col] == source_model_data[col]).astype(int)
+                temp_df[col] = (temp_df[col] == source_model_data[col]).astype(float)
             else:
                 temp_df[col] = self.process_numerical_data(temp_df[col])
 
         temp_df.set_index('model', inplace=True)
-        # print(temp_df.head())
 
         # Calculate the similarity
         source_hyper_param_vector = temp_df.loc['source_model'][self.model_desc.relation_names['hyper_param']].astype(float)
         source_structure_vector = temp_df.loc['source_model'][self.model_desc.relation_names['structure']].astype(float)
-        # print(source_hyper_param_vector)
-        # print(source_hyper_param_vector.to_numpy())
         
         temp_df['hyper_param_similarity'] = 1
         temp_df['struct_similarity'] = 1
-        # print(self.model_desc.relation_names['hyper_param'])
         for model in temp_df.index:
             candidate_hyper_param_vector = temp_df.loc[model][self.model_desc.relation_names['hyper_param']].astype(float)
-            # print(candidate_hyper_param_vector)
-            # print(candidate_hyper_param_vector.to_numpy())
             temp_df.loc[model, 'hyper_param_similarity'] = self.pairwise_similarity(source_hyper_param_vector, candidate_hyper_param_vector, sim_metric=sim_metric)
             
             candidate_structure_vector = temp_df.loc[model][self.model_desc.relation_names['structure']].astype(float)
             temp_df.loc[model, 'structure_similarity'] = self.pairwise_similarity(source_structure_vector, candidate_structure_vector, sim_metric=sim_metric)
-        print('Hyper Param Similarity:', temp_df['hyper_param_similarity'])
+
+        temp_df.drop('source_model', axis=0, inplace=True)
 
         temp_df['perf_similarity'] = 1
 
@@ -105,20 +101,20 @@ class KGNAS:
         temp_perf_df = self.model_desc.hyper_relation_info.copy(deep=True)
         temp_perf_df['target_entity'] = temp_perf_df['target_entity'].apply(lambda x: x[1:])
         perf_df = temp_perf_df[['target_entity', 'source_entity', 'perf']].pivot(index='target_entity', columns='source_entity', values='perf')
-        perf_df.rename({'target_entity': 'structure_id'}, inplace=True).set_index('structure_id', inplace=True)
+        perf_df.reset_index(inplace=True)
+        perf_df.set_index('target_entity', inplace=True)
+        perf_df.fillna(0, inplace=True)
 
+        struct_list = [int(i) for i in source_model_data['has_struct_topology'][1:-1].split(',')]
+        layer_list = [source_model_data[f'has_struct_{i}'] for i in range(1, 5)]
+        source_struct_id = str(Arch(struct_list, layer_list).valid_hash())
         for model in temp_df.index:
-            if model == 'source_model':
-                continue
-            temp_df.loc[model, 'perf_similarity'] = self.pairwise_similarity(perf_df.loc[temp_df.loc[model, 'structure_id']], perf_df.loc[temp_df.loc['source_model', 'structure_id']], sim_metric=sim_metric)
-
-        print('Performance Similarity:', temp_df['perf_similarity'])
+            temp_df.loc[model, 'perf_similarity'] = self.pairwise_similarity(perf_df.loc[temp_df.loc[model, 'structure_id']], perf_df.loc[source_struct_id], sim_metric=sim_metric)
 
         # Averate the similarities as the final similarity
         temp_df['similarity'] = (temp_df['hyper_param_similarity'] + temp_df['structure_similarity'] + 4 * temp_df['perf_similarity']) / 6
 
         # Process the data for future usage
-        temp_df.drop('source_model', axis=0, inplace=True)
         temp_df.drop('structure_id', axis=1, inplace=True)
         temp_df.sort_values(by='similarity', ascending=False, inplace=True)
         temp_df.reset_index(inplace=True)

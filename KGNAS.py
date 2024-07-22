@@ -123,8 +123,8 @@ class KGNAS:
         return temp_df
 
 
-    def get_similar_model(self, source_model_data: pd.Series, candidate_df: pd.DataFrame, topk=5, sim_metric='gower'):
-        model_similarity_df = self.calculate_model_similarity(source_model_data, candidate_df, sim_metric=sim_metric)
+    def get_similar_model(self, source_model_data: pd.Series, candidate_df: pd.DataFrame, topk=5, sim_metric='gower', sim_weights=[1, 1, 1]):
+        model_similarity_df = self.calculate_model_similarity(source_model_data, candidate_df, sim_metric=sim_metric, sim_weights=sim_weights)
         
         return model_similarity_df.head(topk)
     
@@ -294,7 +294,7 @@ class KGNAS:
         bench_vector = bench_vector.to_numpy()
 
         if sim_metric == 'cosine':
-            return torch.nn.functional.cosine_similarity(torch.tensor(target_vector), torch.tensor(bench_vector)).item()
+            return torch.nn.functional.cosine_similarity(torch.tensor(target_vector), torch.tensor(bench_vector), dim=0).item()
         if sim_metric == 'l2':
             return 1 - torch.nn.functional.mse_loss(torch.tensor(target_vector), torch.tensor(bench_vector)).item()
         if sim_metric == 'l1':

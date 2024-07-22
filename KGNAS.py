@@ -57,7 +57,7 @@ class KGNAS:
 
         return dataset_similarities_df
 
-    def calculate_model_similarity(self, source_model_data: pd.Series, candidate_df: pd.DataFrame, sim_metric='gower'):
+    def calculate_model_similarity(self, source_model_data: pd.Series, candidate_df: pd.DataFrame, sim_metric='gower', sim_weights=[1, 1, 4]):
 
         # print(source_model_data)
         source_model_data = pd.Series(source_model_data)
@@ -112,7 +112,7 @@ class KGNAS:
             temp_df.loc[model, 'perf_similarity'] = self.pairwise_similarity(perf_df.loc[temp_df.loc[model, 'structure_id']], perf_df.loc[source_struct_id], sim_metric=sim_metric)
 
         # Averate the similarities as the final similarity
-        temp_df['similarity'] = (temp_df['hyper_param_similarity'] + temp_df['structure_similarity'] + 4 * temp_df['perf_similarity']) / 6
+        temp_df['similarity'] = (sim_weights[0] * temp_df['hyper_param_similarity'] + sim_weights[1] * temp_df['structure_similarity'] + sim_weights[2] * temp_df['perf_similarity']) / sum(sim_weights)
 
         # Process the data for future usage
         temp_df.drop('structure_id', axis=1, inplace=True)
@@ -133,7 +133,7 @@ class KGNAS:
 
         return dataset_similarities_df.head(top_k)
     
-    def recommend_model(self, target_dataset_name, top_k_dataset=5, top_k_model=5, score_metric='average'):
+    def recommend_model(self, target_dataset_name, top_k_dataset=5, top_k_model=5, score_metric='avg'):
         recommend_model_df = pd.DataFrame()
 
         dataset_similarities_df = self.get_similar_dataset(target_dataset_name, top_k=top_k_dataset)
@@ -165,9 +165,9 @@ class KGNAS:
         perf = recommend_model_df['perf'].to_numpy()
         perf = (perf - perf.min()) / (perf.max() - perf.min())
         
-        if score_metric == 'average':
+        if score_metric == 'avg':
             recommend_model_df['score'] = (dataset_similarity + perf) / 2
-        if score_metric == 'multiplication':
+        if score_metric == 'mult':
             recommend_model_df['score'] = dataset_similarity * perf
         
         return recommend_model_df

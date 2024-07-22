@@ -57,7 +57,8 @@ print(kgnas.get_similar_dataset('DBLP', top_k=5, sim_metric='gower'))
 
 # STEP5: The recommended models can be obtained directly by calling the following function, the top_k_dataset and top_k_model are the number of similar datasets and models to be recommended.
 # This returns a dataframe with the all the related information of the models and the datasets.
-print(kgnas.recommend_model('DBLP', top_k_dataset=5, top_k_model=5))
+# The NEW scroe_metric indicates the method of integrating the model performance and the dataset similarity into a score, the options are: 'avg' and 'mult'.
+print(kgnas.recommend_model('DBLP', top_k_dataset=5, top_k_model=5, score_metric='avg'))
 ```
 
 ### Recommend renewed models given the similar datasets to the new dataset and the existing model.
@@ -107,9 +108,10 @@ semantic_description = {
 kgnas.add_dataset_description('DBLP', dataset[0], semantic_description=semantic_description)
 
 # STEP4: Find the best performing top-k models from the most similar top-k datasets. The returned dataframe contains the information of the models and the datasets.
-candidate_df = kgnas.recommend_model('DBLP', top_k_dataset=3, top_k_model=20)
+candidate_df = kgnas.recommend_model('DBLP', top_k_dataset=3, top_k_model=20, score_metric='avg')
 
-# STEP5: Establish the model that you want to improve on. Here, as an example, the model is selected as the first model in the candidate_df.
+# STEP5: Establish the model info that you want to improve on. Here, as an example, the model is selected as the first model in the candidate_df.
+# The input type should be a pandas series.
 # In practice, you can first copy one model in the candidate_df and renew the content by the actual model to save effort. An example is shown below.
 # model                                                    147206
 # perf                                                   0.715667
@@ -138,8 +140,8 @@ candidate_model = candidate_df.iloc[0]
 print(candidate_model)
 
 # STEP6: Get the similar models of the given model based on the candidate_df from the last step. To make the recommendation more effective, it is recommended to enlarge the candidate pool from the last step.
-# The similarity is calculated based on three parts: the structural similarity, the hyperparameters similarity and the model performance similarity, their weights are 1:1:4 towards the final similarity.
-similar_model_df = kgnas.get_similar_model(candidate_model, candidate_df, topk=5, sim_metric='l2')
+# The similarity is calculated based on three parts: the structural similarity, the hyperparameters similarity and the model performance similarity, their weights are currently 1:1:4 towards the final similarity.
+similar_model_df = kgnas.get_similar_model(candidate_model, candidate_df, topk=5, sim_metric='l2', sim_weight=[1, 1, 4])
 
 print(similar_model_df.head())
 ```
@@ -147,5 +149,5 @@ print(similar_model_df.head())
 
 ## Remarks
 
-1. Currently only support the initial model recommendation for the given dataset. The model-model similarity is not considered yet, so that no further operations avaliable.
-2. The existing model information are not able to be added into the KG, will be considered later.
+<!-- 1. Currently only support the initial model recommendation for the given dataset. The model-model similarity is not considered yet, so that no further operations avaliable. -->
+1. The existing model information are not able to be added into the KG, will be considered later.

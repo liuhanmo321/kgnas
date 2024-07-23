@@ -90,7 +90,7 @@ class KGNAS:
             temp_df.loc[model, 'hyper_param_similarity'] = self.pairwise_similarity(source_hyper_param_vector, candidate_hyper_param_vector, sim_metric=sim_metric)
             
             candidate_structure_vector = temp_df.loc[model][self.model_desc.relation_names['structure']].astype(float)
-            temp_df.loc[model, 'structure_similarity'] = self.pairwise_similarity(source_structure_vector, candidate_structure_vector, sim_metric=sim_metric)
+            temp_df.loc[model, 'struct_similarity'] = self.pairwise_similarity(source_structure_vector, candidate_structure_vector, sim_metric=sim_metric)
 
         temp_df.drop('source_model', axis=0, inplace=True)
 
@@ -112,15 +112,18 @@ class KGNAS:
             temp_df.loc[model, 'perf_similarity'] = self.pairwise_similarity(perf_df.loc[temp_df.loc[model, 'structure_id']], perf_df.loc[source_struct_id], sim_metric=sim_metric)
 
         # Averate the similarities as the final similarity
-        temp_df['similarity'] = (sim_weights[0] * temp_df['hyper_param_similarity'] + sim_weights[1] * temp_df['structure_similarity'] + sim_weights[2] * temp_df['perf_similarity']) / sum(sim_weights)
+        temp_df['similarity'] = (sim_weights[0] * temp_df['hyper_param_similarity'] + sim_weights[1] * temp_df['struct_similarity'] + sim_weights[2] * temp_df['perf_similarity']) / sum(sim_weights)
 
-        # Process the data for future usage
-        temp_df.drop('structure_id', axis=1, inplace=True)
-        temp_df.sort_values(by='similarity', ascending=False, inplace=True)
         temp_df.reset_index(inplace=True)
-        
+        # print(temp_df.index)
+        # print(candidate_df.index)
+        candidate_df['similarity'] = temp_df['similarity'].copy(deep=True)
+        candidate_df['hyper_param_similarity'] = temp_df['hyper_param_similarity'].copy(deep=True)
+        candidate_df['struct_similarity'] = temp_df['struct_similarity'].copy(deep=True)
+        candidate_df['perf_similarity'] = temp_df['perf_similarity'].copy(deep=True)
+
         # Return only the necessary information
-        return temp_df
+        return candidate_df
 
 
     def get_similar_model(self, source_model_data: pd.Series, candidate_df: pd.DataFrame, topk=5, sim_metric='gower', sim_weights=[1, 1, 1]):
@@ -128,21 +131,26 @@ class KGNAS:
         
         return model_similarity_df.head(topk)
     
-    def get_similar_dataset(self, target_dataset_name, top_k=5, sim_metric='gower'):
+    def get_similar_dataset(self, target_dataset_name, top_k=5, sim_metric='gower', include_target_dataset=True):
         dataset_similarities_df = self.calculate_dataset_similarity(target_dataset_name, sim_metric=sim_metric)
+
+        if not include_target_dataset:
+            k = min(top_k, dataset_similarities_df.shape[0] - 1)
+            return dataset_similarities_df[dataset_similarities_df['dataset'] != target_dataset_name].head(k)
 
         return dataset_similarities_df.head(top_k)
     
-    def recommend_model(self, target_dataset_name, top_k_dataset=5, top_k_model=5, score_metric='avg'):
+    def recommend_model(self, target_dataset_name, top_k_dataset=5, top_k_model=5, score_metric='avg', include_target_dataset=True):
         recommend_model_df = pd.DataFrame()
 
-        dataset_similarities_df = self.get_similar_dataset(target_dataset_name, top_k=top_k_dataset)
+        dataset_similarities_df = self.get_similar_dataset(target_dataset_name, top_k=top_k_dataset, include_target_dataset=include_target_dataset)
 
         # Obtain the top-k models for each of the similar datasets with their performance information.
         for _, row in dataset_similarities_df.iterrows():
             temp_top_model_df = self.get_top_model_from_dataset(row['dataset'], top_k=top_k_model)
             temp_top_model_df['dataset'] = row['dataset']
             temp_top_model_df['dataset_similarity'] = row['dataset_similarity']
+            temp_top_model_df['standardized_perf'] = (temp_top_model_df['perf'] - temp_top_model_df['perf'].min()) / (temp_top_model_df['perf'].max() - temp_top_model_df['perf'].min())
             if recommend_model_df.shape[0] == 0:
                 recommend_model_df = temp_top_model_df.copy(deep=True)
             else:
@@ -162,16 +170,21 @@ class KGNAS:
         dataset_similarity = recommend_model_df['dataset_similarity'].to_numpy()
         dataset_similarity = (dataset_similarity - dataset_similarity.min()) / (dataset_similarity.max() - dataset_similarity.min())
         
-        perf = recommend_model_df['perf'].to_numpy()
-        perf = (perf - perf.min()) / (perf.max() - perf.min())
+        # Standardize the models based on their interial performance with the dataset.
+        perf = recommend_model_df['standardized_perf'].to_numpy()
+        # perf = (perf - perf.min()) / (perf.max() - perf.min())
         
         if score_metric == 'avg':
             recommend_model_df['score'] = (dataset_similarity + perf) / 2
         if score_metric == 'mult':
             recommend_model_df['score'] = dataset_similarity * perf
-        
-        return recommend_model_df
 
+        return recommend_model_df
+        # if include_target_dataset:
+        #     return recommend_model_df
+        # else:
+        #     return recommend_model_df[recommend_model_df['dataset'] != target_dataset_name]
+        
     def get_top_model_from_dataset(self, dataset_name, perf_metric='perf', top_k=10):
         top_model_df = self.model_desc.hyper_relation_info[self.model_desc.hyper_relation_info['source_entity'] == dataset_name].sort_values(by=perf_metric, ascending=False).head(top_k).copy(deep=True)
         top_model_df = top_model_df[['target_entity', perf_metric]]

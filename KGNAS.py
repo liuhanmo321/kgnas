@@ -13,38 +13,37 @@ from nas_bench_graph import Arch
 BENCH_DATASET_NAME = ['cora', 'citeseer', 'pubmed', 'cs', 'physics', 'photo', 'computers', 'arxiv', 'proteins']
 
 class KGNAS:
-    class KGNAS:
-        """
-        Class representing the KGNAS (Knowledge Graph Neural Architecture Search) module.
+    """
+    Class representing the KGNAS (Knowledge Graph Neural Architecture Search) module.
 
-        Args:
-            kg_dir (str): Directory path to the knowledge graph.
-            numerical_weight (float): Weight assigned to numerical features in the KG. Default is 0.5.
+    Args:
+        kg_dir (str): Directory path to the knowledge graph.
+        numerical_weight (float): Weight assigned to numerical features in the KG. Default is 0.5.
 
-        Attributes:
-            dataset_desc (DatasetDescription): Instance of the DatasetDescription class.
-            model_desc (ModelDescription): Instance of the ModelDescription class.
-            KG (nx.Graph): Knowledge graph.
+    Attributes:
+        dataset_desc (DatasetDescription): Instance of the DatasetDescription class.
+        model_desc (ModelDescription): Instance of the ModelDescription class.
+        KG (nx.Graph): Knowledge graph.
 
-            kg_dir (str): Directory path to the knowledge graph.
-            entities (list): List of entities in the knowledge graph.
+        kg_dir (str): Directory path to the knowledge graph.
+        entities (list): List of entities in the knowledge graph.
 
-            numerical_weight (float): Weight assigned to numerical features in the KG.
-            categorical_weight (float): Weight assigned to categorical features in the KG.
+        numerical_weight (float): Weight assigned to numerical features in the KG.
+        categorical_weight (float): Weight assigned to categorical features in the KG.
 
-        """
+    """
 
-        def __init__(self, kg_dir='./KG/', numerical_weight=0.5):
-            self.dataset_desc = DatasetDescription()
-            self.model_desc = ModelDescription()
-            self.KG = nx.Graph()
+    def __init__(self, kg_dir='./KG/', numerical_weight=0.5):
+        self.dataset_desc = DatasetDescription()
+        self.model_desc = ModelDescription()
+        self.KG = nx.Graph()
 
-            self.kg_dir = kg_dir
+        self.kg_dir = kg_dir
 
-            self.entities = []
+        self.entities = []
 
-            self.numerical_weight = numerical_weight
-            self.categorical_weight = 1 - numerical_weight
+        self.numerical_weight = numerical_weight
+        self.categorical_weight = 1 - numerical_weight
 
     def calculate_dataset_similarity(self, target_dataset_name, sim_metric='gower'):
         """
@@ -206,7 +205,7 @@ class KGNAS:
 
         return dataset_similarities_df.head(top_k)
     
-    def recommend_model(self, target_dataset_name, top_k_dataset=5, top_k_model=5, score_metric='avg', include_target_dataset=True):
+    def recommend_model(self, target_dataset_name, top_k_dataset=5, top_k_model=5, sim_metric='l2', score_metric='avg', include_target_dataset=True):
         """
         Recommends models based on the target dataset and their performance information.
 
@@ -222,7 +221,7 @@ class KGNAS:
         """
         recommend_model_df = pd.DataFrame()
 
-        dataset_similarities_df = self.get_similar_dataset(target_dataset_name, top_k=top_k_dataset, include_target_dataset=include_target_dataset)
+        dataset_similarities_df = self.get_similar_dataset(target_dataset_name, top_k=top_k_dataset, sim_metric=sim_metric, include_target_dataset=include_target_dataset)
 
         # Obtain the top-k models for each of the similar datasets with their performance information.
         for _, row in dataset_similarities_df.iterrows():

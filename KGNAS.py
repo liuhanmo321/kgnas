@@ -13,19 +13,51 @@ from nas_bench_graph import Arch
 BENCH_DATASET_NAME = ['cora', 'citeseer', 'pubmed', 'cs', 'physics', 'photo', 'computers', 'arxiv', 'proteins']
 
 class KGNAS:
-    def __init__(self, kg_dir='./KG/', numerical_weight=0.5):
-        self.dataset_desc = DatasetDescription()
-        self.model_desc = ModelDescription()
-        self.KG = nx.Graph()
+    class KGNAS:
+        """
+        Class representing the KGNAS (Knowledge Graph Neural Architecture Search) module.
 
-        self.kg_dir = kg_dir
+        Args:
+            kg_dir (str): Directory path to the knowledge graph.
+            numerical_weight (float): Weight assigned to numerical features in the KG. Default is 0.5.
 
-        self.entities = []
+        Attributes:
+            dataset_desc (DatasetDescription): Instance of the DatasetDescription class.
+            model_desc (ModelDescription): Instance of the ModelDescription class.
+            KG (nx.Graph): Knowledge graph.
 
-        self.numerical_weight = numerical_weight
-        self.categorical_weight = 1 - numerical_weight
+            kg_dir (str): Directory path to the knowledge graph.
+            entities (list): List of entities in the knowledge graph.
+
+            numerical_weight (float): Weight assigned to numerical features in the KG.
+            categorical_weight (float): Weight assigned to categorical features in the KG.
+
+        """
+
+        def __init__(self, kg_dir='./KG/', numerical_weight=0.5):
+            self.dataset_desc = DatasetDescription()
+            self.model_desc = ModelDescription()
+            self.KG = nx.Graph()
+
+            self.kg_dir = kg_dir
+
+            self.entities = []
+
+            self.numerical_weight = numerical_weight
+            self.categorical_weight = 1 - numerical_weight
 
     def calculate_dataset_similarity(self, target_dataset_name, sim_metric='gower'):
+        """
+        Calculate the similarity between the target dataset and other datasets in the KGNAS dataset.
+
+        Args:
+            target_dataset_name (str): The name of the target dataset.
+            sim_metric (str, optional): The similarity metric to use. Defaults to 'gower'.
+
+        Returns:
+            pandas.DataFrame: A DataFrame containing the dataset names and their similarity scores, sorted in descending order.
+
+        """
         # uniary similarity: a vector of decimal numbers for each of the statistical values.
         temp_df = self.dataset_desc.uniary_info.copy(deep=True)
         numerical_columns = temp_df.select_dtypes(include=['number']).columns
@@ -49,8 +81,6 @@ class KGNAS:
             bench_vector = temp_df.loc[dataset]
             dataset_similarities['dataset'].append(dataset)
             dataset_similarities['dataset_similarity'].append(self.pairwise_similarity(target_vector, bench_vector, sim_metric=sim_metric, numerical_columns=numerical_columns, categorical_columns=categorical_columns))
-
-        # print(dataset_similarities)
         
         dataset_similarities_df = pd.DataFrame(dataset_similarities)
         dataset_similarities_df.sort_values(by=['dataset_similarity'], ascending=False, inplace=True)
@@ -58,7 +88,20 @@ class KGNAS:
         return dataset_similarities_df
 
     def calculate_model_similarity(self, source_model_data: pd.Series, candidate_df: pd.DataFrame, sim_metric='gower', sim_weights=[1, 1, 4]):
+        """
+        Calculates the similarity between a source model and a dataframe of candidate models.
+        The similarity is calculated based on the hyperparameters, structure, and performance of the models.
+        Three types of similarities are calculated separately and then combined using the weights provided.
 
+        Args:
+            source_model_data (pd.Series): The data of the source model.
+            candidate_df (pd.DataFrame): The dataframe containing the candidate models.
+            sim_metric (str, optional): The similarity metric to use. Defaults to 'gower'.
+            sim_weights (list, optional): The weights for the different similarity components. Defaults to [1, 1, 4].
+
+        Returns:
+            pd.DataFrame: The candidate dataframe with additional similarity information.
+        """
         # print(source_model_data)
         source_model_data = pd.Series(source_model_data)
         source_model_data['model'] = 'source_model'
@@ -115,8 +158,6 @@ class KGNAS:
         temp_df['similarity'] = (sim_weights[0] * temp_df['hyper_param_similarity'] + sim_weights[1] * temp_df['struct_similarity'] + sim_weights[2] * temp_df['perf_similarity']) / sum(sim_weights)
 
         temp_df.reset_index(inplace=True)
-        # print(temp_df.index)
-        # print(candidate_df.index)
         candidate_df['similarity'] = temp_df['similarity'].copy(deep=True)
         candidate_df['hyper_param_similarity'] = temp_df['hyper_param_similarity'].copy(deep=True)
         candidate_df['struct_similarity'] = temp_df['struct_similarity'].copy(deep=True)
@@ -126,12 +167,37 @@ class KGNAS:
         return candidate_df
 
 
-    def get_similar_model(self, source_model_data: pd.Series, candidate_df: pd.DataFrame, topk=5, sim_metric='gower', sim_weights=[1, 1, 1]):
+    def get_similar_model(self, source_model_data: pd.Series, candidate_df: pd.DataFrame, topk=5, sim_metric='gower', sim_weights=[1, 1, 4]):
+        """
+        Retrieves the top-k similar models based on the similarity metric and weights.
+
+        Parameters:
+        - source_model_data (pd.Series): The data of the source model.
+        - candidate_df (pd.DataFrame): The DataFrame containing the candidate models.
+        - topk (int): The number of similar models to retrieve. Default is 5.
+        - sim_metric (str): The similarity metric to use. Default is 'gower'.
+        - sim_weights (list): The weights for each feature in the similarity calculation. Default is [1, 1, 4].
+
+        Returns:
+        - model_similarity_df (pd.DataFrame): The DataFrame containing the top-k similar models.
+        """
         model_similarity_df = self.calculate_model_similarity(source_model_data, candidate_df, sim_metric=sim_metric, sim_weights=sim_weights)
         
         return model_similarity_df.head(topk)
     
     def get_similar_dataset(self, target_dataset_name, top_k=5, sim_metric='gower', include_target_dataset=True):
+        """
+        Retrieves the most similar datasets to the target dataset based on a similarity metric.
+
+        Parameters:
+            target_dataset_name (str): The name of the target dataset.
+            top_k (int): The number of similar datasets to retrieve (default is 5).
+            sim_metric (str): The similarity metric to use (default is 'gower').
+            include_target_dataset (bool): Whether to include the target dataset in the results (default is True).
+
+        Returns:
+            pandas.DataFrame: A DataFrame containing the most similar datasets.
+        """
         dataset_similarities_df = self.calculate_dataset_similarity(target_dataset_name, sim_metric=sim_metric)
 
         if not include_target_dataset:
@@ -141,6 +207,19 @@ class KGNAS:
         return dataset_similarities_df.head(top_k)
     
     def recommend_model(self, target_dataset_name, top_k_dataset=5, top_k_model=5, score_metric='avg', include_target_dataset=True):
+        """
+        Recommends models based on the target dataset and their performance information.
+
+        Parameters:
+            target_dataset_name (str): The name of the target dataset.
+            top_k_dataset (int): The number of similar datasets to consider.
+            top_k_model (int): The number of top models to recommend for each similar dataset.
+            score_metric (str): The scoring metric to use for recommendation. Options are 'avg' (average) and 'mult' (multiplication).
+            include_target_dataset (bool): Flag to indicate whether to include the target dataset in the recommendations.
+
+        Returns:
+            recommend_model_df (DataFrame): A DataFrame containing the recommended models with their performance information and scores.
+        """
         recommend_model_df = pd.DataFrame()
 
         dataset_similarities_df = self.get_similar_dataset(target_dataset_name, top_k=top_k_dataset, include_target_dataset=include_target_dataset)
@@ -172,7 +251,6 @@ class KGNAS:
         
         # Standardize the models based on their interial performance with the dataset.
         perf = recommend_model_df['standardized_perf'].to_numpy()
-        # perf = (perf - perf.min()) / (perf.max() - perf.min())
         
         if score_metric == 'avg':
             recommend_model_df['score'] = (dataset_similarity + perf) / 2
@@ -180,20 +258,25 @@ class KGNAS:
             recommend_model_df['score'] = dataset_similarity * perf
 
         return recommend_model_df
-        # if include_target_dataset:
-        #     return recommend_model_df
-        # else:
-        #     return recommend_model_df[recommend_model_df['dataset'] != target_dataset_name]
         
     def get_top_model_from_dataset(self, dataset_name, perf_metric='perf', top_k=10):
+        """
+        Retrieves the top models from a given dataset based on a performance metric.
+
+        Parameters:
+        - dataset_name (str): The name of the dataset.
+        - perf_metric (str): The performance metric to sort the models by. Default is 'perf'.
+        - top_k (int): The number of top models to retrieve. Default is 10.
+
+        Returns:
+        - top_model_df (DataFrame): A DataFrame containing the top models and their corresponding performance metric.
+        """
         top_model_df = self.model_desc.hyper_relation_info[self.model_desc.hyper_relation_info['source_entity'] == dataset_name].sort_values(by=perf_metric, ascending=False).head(top_k).copy(deep=True)
         top_model_df = top_model_df[['target_entity', perf_metric]]
         top_model_df.sort_values(by=perf_metric, ascending=False, inplace=True)
         top_model_df.rename(columns={'target_entity': 'model'}, inplace=True)
 
         return top_model_df
-
-
 
     def visualize(self):
         pass

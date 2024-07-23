@@ -58,7 +58,8 @@ print(kgnas.get_similar_dataset('DBLP', top_k=5, sim_metric='gower'))
 # STEP5: The recommended models can be obtained directly by calling the following function, the top_k_dataset and top_k_model are the number of similar datasets and models to be recommended.
 # This returns a dataframe with the all the related information of the models and the datasets.
 # The NEW scroe_metric indicates the method of integrating the model performance and the dataset similarity into a score, the options are: 'avg' and 'mult'. The returned 'score' is a new column to rank the models.
-print(kgnas.recommend_model('DBLP', top_k_dataset=5, top_k_model=5, score_metric='avg'))
+# In case the dataset is from the benchmark, you can set include_target_dataset=True to include the target dataset in the recommendation or set to False to exclude it.
+print(kgnas.recommend_model('DBLP', top_k_dataset=5, top_k_model=5, score_metric='avg', include_target_dataset=True))
 ```
 
 ### Recommend renewed models given the similar datasets to the new dataset and the existing model.

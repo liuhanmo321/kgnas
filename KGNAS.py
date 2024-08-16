@@ -45,6 +45,20 @@ class KGNAS:
         self.numerical_weight = numerical_weight
         self.categorical_weight = 1 - numerical_weight
 
+        self.normalize = True
+        self.standardize = False
+        self.activation = 'abs'
+        self.power = 1
+        self.upper_bound = 1.0
+        self.lower_bound = 0
+        self.process_method = 'normal'
+        self.bound_frac = 1
+        self.dynamic_upperbound_dict = {}
+
+        self.normalized_data_desc_df = None
+        self.dataset_numerical_columns = None
+        self.dataset_categorical_columns = None
+
     def calculate_dataset_similarity(self, target_dataset_name, sim_metric='gower'):
         """
         Calculate the similarity between the target dataset and other datasets in the KGNAS dataset.
@@ -60,12 +74,22 @@ class KGNAS:
         # uniary similarity: a vector of decimal numbers for each of the statistical values.
         temp_df = self.dataset_desc.uniary_info.copy(deep=True)
         numerical_columns = temp_df.select_dtypes(include=['number']).columns
+        self.dataset_numerical_columns = numerical_columns
 
+        target_index = temp_df[temp_df['Dataset'] == target_dataset_name].index[0]
+
+        IQR_list = []
         for col in numerical_columns:
-            temp_df[col] = self.process_numerical_data(temp_df[col])
+            temp_df[col], IQR = self.process_numerical_data(temp_df[col], process_method=self.process_method, target_index=target_index)
+            if IQR is not None:
+                IQR_list.append(IQR)
+        dynamic_upperbound = np.array(IQR_list) * self.bound_frac if len(IQR_list) > 0 else None
+
+        self.dynamic_upperbound_dict[target_dataset_name] = dynamic_upperbound
 
         # two-ary similarity: a vector of 0s and 1s.
         categorical_columns = self.dataset_desc.two_ary_info['relation'].unique()
+        self.dataset_categorical_columns = categorical_columns
         for relation in categorical_columns:
             temp_df[relation] = 0
 
@@ -75,11 +99,14 @@ class KGNAS:
 
         dataset_similarities = {'dataset': [], 'dataset_similarity': []}
         temp_df.set_index('Dataset', inplace=True)
+
+        self.normalized_data_desc_df = temp_df.copy(deep=True)
+
         target_vector = temp_df.loc[target_dataset_name]
         for dataset in BENCH_DATASET_NAME:
             bench_vector = temp_df.loc[dataset]
             dataset_similarities['dataset'].append(dataset)
-            dataset_similarities['dataset_similarity'].append(self.pairwise_similarity(target_vector, bench_vector, sim_metric=sim_metric, numerical_columns=numerical_columns, categorical_columns=categorical_columns))
+            dataset_similarities['dataset_similarity'].append(self.pairwise_similarity(target_vector, bench_vector, sim_metric=sim_metric, numerical_columns=numerical_columns, categorical_columns=categorical_columns, standardize=self.standardize, activation=self.activation, dynamic_upperbound=dynamic_upperbound))
         
         dataset_similarities_df = pd.DataFrame(dataset_similarities)
         dataset_similarities_df.sort_values(by=['dataset_similarity'], ascending=False, inplace=True)
@@ -280,19 +307,19 @@ class KGNAS:
     def visualize(self):
         pass
 
+    def set_num_weight(self, weight):
+        self.numerical_weight = weight
+        self.categorical_weight = 1 - weight
+    
     def generate_knowledge_graph(self):
         model_2ary_edges = [(row['source_entity'], row['target_entity'], {'relation': row['relation']}) for idx, row in self.model_desc.two_ary_info.iterrows()]
-        # print(len(model_2ary_edges))
         self.KG.add_edges_from(model_2ary_edges)
 
         data_2ary_edges = [(row['source_entity'], row['target_entity'], {'relation': row['relation']}) for idx, row in self.dataset_desc.two_ary_info.iterrows()]
-        # print(len(data_2ary_edges))
-        # print(self.dataset_desc.two_ary_info['source_entity'].unique())
         self.KG.add_edges_from(data_2ary_edges)
         
         hyper_relation_names = list(self.model_desc.hyper_relation_info.columns.difference(['source_entity', 'target_entity']))
         model_hyper_edges = [(row['source_entity'], row['target_entity'], {key: row[key] for key in hyper_relation_names}) for idx, row in self.model_desc.hyper_relation_info.iterrows()]
-        # print(self.model_desc.hyper_relation_info['source_entity'].unique())
         self.KG.add_edges_from(model_hyper_edges)
 
         self.entities = set(self.KG.nodes)
@@ -304,16 +331,14 @@ class KGNAS:
         data = nx.node_link_data(self.KG)
         with open(dir+"KGNAS.json", 'w') as f:
             json.dump(data, f)
-        # nx.write_weighted_edgelist(self.KG, dir+"KGNAS.weighted.edgelist")
 
     def load_knowledge_graph(self, dir='./KG/'):
-        # self.KG = nx.read_weighted_edgelist(dir+"KGNAS.weighted.edgelist")
         with open(dir+"KGNAS.json", 'r') as f:
             data = json.load(f)
             self.KG = nx.node_link_graph(data)
 
     def get_knowledge_graph(self):
-        pass
+        return self.KG
 
     def summrize_knowledge_graph(self):
         if not os.path.exists(self.kg_dir+"KGNAS.json"):
@@ -336,15 +361,41 @@ class KGNAS:
         print("Maximum degree:", max_degree)
         print("Minimum degree:", min_degree)
 
+        num_binary_relations = len(self.model_desc.two_ary_info) + len(self.dataset_desc.two_ary_info)
+        num_hyper_relations = len(self.model_desc.hyper_relation_info)
+
+        print(f"Number of binary relations: {num_binary_relations}")
+        print(f"Number of hyper relations: {num_hyper_relations}")
+
+        num_models = len(self.model_desc.hyper_relation_info['target_entity'].unique())
+        num_datasets = len(self.dataset_desc.two_ary_info['source_entity'].unique())
+
+        print(f"Number of models: {num_models}")
+        print(f"Number of datasets: {num_datasets}")
+
     def add_dataset_description(self, dataset_name, dataset=None, semantic_description=None, root_dir='datasets/', num_samples=20, num_hops=2, seed=42):
         self.dataset_desc.add_description(dataset_name, dataset=dataset, semantic_description=semantic_description, root_dir=root_dir, num_samples=num_samples, num_hops=num_hops, seed=seed)
 
-    def process_numerical_data(self, column):
+    def process_numerical_data(self, column, process_method='normal', target_index=None):
         column = column.fillna(0)
-        column = (column - column.min()) / (column.max() - column.min())
-        return column
+
+        if process_method == 'normal':
+            column = (column - column.min()) / (column.max() - column.min())
+            return column, None
+        
+        if process_method == 'outlier':
+            exclude_column = column[column.index != target_index]
+            max_val = exclude_column.max()
+            min_val = exclude_column.min()
+            exclude_column = (exclude_column - min_val) / (max_val - min_val)
+            Q1 = exclude_column.quantile(0.25)
+            Q3 = exclude_column.quantile(0.75)
+            IQR = Q3 - Q1
+            column = (column - min_val) / (max_val - min_val)
+            
+            return column, IQR
     
-    def pairwise_similarity(self, target_vector, bench_vector, sim_metric='gower', numerical_columns=None, categorical_columns=None):
+    def pairwise_similarity(self, target_vector, bench_vector, sim_metric='gower', numerical_columns=None, categorical_columns=None, standardize=False, activation='abs', dynamic_upperbound=None, return_raw=False):
         if sim_metric == 'gower':
 
             target_num_vector = target_vector[numerical_columns].to_numpy()
@@ -377,8 +428,36 @@ class KGNAS:
                 # dice_distance = 1 - dice_similarity
 
                 return dice_similarity
+                        
+            if standardize:
+                target_num_vector = (target_num_vector - target_num_vector.mean()) / target_num_vector.std()
+                bench_num_vector = (bench_num_vector - bench_num_vector.mean()) / bench_num_vector.std()
+
+            numerical_similarity_vector = np.abs(target_num_vector - bench_num_vector)
+
+            if activation == 'power':
+                if self.power < 0:
+                    numerical_similarity_vector = 1 - np.power(1 - numerical_similarity_vector, -self.power)
+                else:
+                    numerical_similarity_vector = np.power(numerical_similarity_vector, self.power)
+            elif activation == 'tanh':
+                numerical_similarity_vector = np.tanh(numerical_similarity_vector)
             
-            numerical_similarity = np.mean(1 - np.abs(target_num_vector - bench_num_vector))
+
+            bound = dynamic_upperbound if dynamic_upperbound is not None else self.upper_bound
+
+            # print(bound)
+
+            if self.power < 0 and activation == 'power':
+                numerical_similarity_vector = numerical_similarity_vector * bound + self.lower_bound
+            else:
+                numerical_similarity_vector = np.minimum(numerical_similarity_vector, bound) + self.lower_bound
+
+            if return_raw:
+                return 1 - numerical_similarity_vector
+            
+            numerical_similarity = np.mean(1 - numerical_similarity_vector)
+
             categorical_similarity = dice_similarity(target_cat_vector, bench_cat_vector)
             
             similarity = self.numerical_weight * numerical_similarity + self.categorical_weight * categorical_similarity
@@ -394,3 +473,11 @@ class KGNAS:
             return 1 - torch.nn.functional.mse_loss(torch.tensor(target_vector), torch.tensor(bench_vector)).item()
         if sim_metric == 'l1':
             return 1 - torch.nn.functional.l1_loss(torch.tensor(target_vector), torch.tensor(bench_vector)).item()
+        
+    def get_similarity_vector(self, source_dataset, target_dataset):
+        source_vector = self.normalized_data_desc_df.loc[source_dataset]
+        target_vector = self.normalized_data_desc_df.loc[target_dataset]
+
+        similarity_vector = self.pairwise_similarity(source_vector, target_vector, sim_metric='gower', numerical_columns=self.dataset_numerical_columns, categorical_columns=self.dataset_categorical_columns, standardize=self.standardize, activation=self.activation, dynamic_upperbound=self.dynamic_upperbound_dict[source_dataset], return_raw=True)
+
+        return similarity_vector

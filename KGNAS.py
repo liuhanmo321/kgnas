@@ -9,6 +9,7 @@ import json
 from .dataset.DatasetDescription import DatasetDescription
 from .model.ModelDescription import ModelDescription
 from nas_bench_graph import Arch
+from .utils.utils import *
 
 BENCH_DATASET_NAME = ['cora', 'citeseer', 'pubmed', 'cs', 'physics', 'photo', 'computers', 'arxiv', 'proteins']
 
@@ -33,9 +34,9 @@ class KGNAS:
 
     """
 
-    def __init__(self, kg_dir='./KG/', numerical_weight=0.5):
-        self.dataset_desc = DatasetDescription()
-        self.model_desc = ModelDescription()
+    def __init__(self, kg_dir='./KG/', numerical_weight=0.5, load=False):
+        self.dataset_desc = DatasetDescription(kg_dir=kg_dir, load=load)
+        self.model_desc = ModelDescription(kg_dir=kg_dir, load=load)
         self.KG = nx.Graph()
 
         self.kg_dir = kg_dir
@@ -76,7 +77,7 @@ class KGNAS:
         numerical_columns = temp_df.select_dtypes(include=['number']).columns
         self.dataset_numerical_columns = numerical_columns
 
-        target_index = temp_df[temp_df['Dataset'] == target_dataset_name].index[0]
+        target_index = temp_df[temp_df['dataset'] == target_dataset_name].index[0]
 
         IQR_list = []
         for col in numerical_columns:
@@ -98,7 +99,7 @@ class KGNAS:
             temp_df[relation] = (relation_df['target_entity'] == target_entity).astype(int)
 
         dataset_similarities = {'dataset': [], 'dataset_similarity': []}
-        temp_df.set_index('Dataset', inplace=True)
+        temp_df.set_index('dataset', inplace=True)
 
         self.normalized_data_desc_df = temp_df.copy(deep=True)
 
@@ -311,7 +312,7 @@ class KGNAS:
         self.numerical_weight = weight
         self.categorical_weight = 1 - weight
     
-    def generate_knowledge_graph(self):
+    def generate_graph(self):
         model_2ary_edges = [(row['source_entity'], row['target_entity'], {'relation': row['relation']}) for idx, row in self.model_desc.two_ary_info.iterrows()]
         self.KG.add_edges_from(model_2ary_edges)
 
@@ -324,27 +325,103 @@ class KGNAS:
 
         self.entities = set(self.KG.nodes)
 
-    def save_knowledge_graph(self, dir='./KG/'):
+    def save_graph(self, dir='./KG/'):
         if not os.path.exists(dir):
             os.makedirs(dir)
 
         data = nx.node_link_data(self.KG)
-        with open(dir+"KGNAS.json", 'w') as f:
+        with open(dir+"KGNAS_graph.json", 'w') as f:
             json.dump(data, f)
 
-    def load_knowledge_graph(self, dir='./KG/'):
-        with open(dir+"KGNAS.json", 'r') as f:
+    def load_graph(self, dir='./KG/'):
+        with open(dir+"KGNAS_graph.json", 'r') as f:
             data = json.load(f)
             self.KG = nx.node_link_graph(data)
+
+    def save_knowledge_graph(self):
+        entities = []
+        relations = []
+
+        for row in self.dataset_desc.uniary_info.iterrows():
+            row_dict = {'name': row['dataset'], 'type': 'dataset', 'property': row.drop('dataset').to_dict()}
+            entities.append(row_dict)
+
+        for row in self.model_desc.uniary_info.iterrows():
+            row_dict = {'name': row['model'], 'type': 'model', 'property': row.drop('model').to_dict()}
+            entities.append(row_dict)
+
+        for row in self.dataset_desc.two_ary_info.iterrows():
+            row_dict = {'source_entity': row['source_entity'], 'target_entity': row['target_entity'], 'type': 'dataset_related', 'property': {'relation': row['relation']}}
+            relations.append(row_dict)
+
+        for row in self.model_desc.two_ary_info.iterrows():
+            row_dict = {'source_entity': row['source_entity'], 'target_entity': row['target_entity'], 'type': 'model_related', 'property': {'relation': row['relation']}}
+            relations.append(row_dict)
+
+        for row in self.model_desc.hyper_relation_info.iterrows():
+            row_dict = {'source_entity': row['source_entity'], 'target_entity': row['target_entity'], 'type': 'model_dataset', 'property': row.drop(['source_entity', 'target_entity']).to_dict()}
+            relations.append(row_dict)
+
+        knowledge_graph = {'entities': entities, 'relations': relations}
+
+        with open(self.kg_dir+"KGNAS_knowledge_graph.json", 'w') as f:
+            json.dump(knowledge_graph, f)
+
+    def load_knowledge_graph(self):
+        with open(self.kg_dir+"KGNAS_knowledge_graph.json", 'r') as f:
+            knowledge_graph = json.load(f)
+
+        entities = knowledge_graph['entities']
+        relations = knowledge_graph['relations']
+
+        dataset_entities = [entity for entity in entities if entity['type'] == 'dataset']
+        dataset_entity_df = {}
+        dataset_entity_df['dataset'] = [entity['name'] for entity in dataset_entities]
+        property_names = dataset_entities[0]['property'].keys()
+        for property in property_names:
+            dataset_entity_df[property] = [entity['property'][property] for entity in dataset_entities]
+        self.dataset_desc.uniary_info = pd.DataFrame(dataset_entity_df)
+
+        model_entities = [entity for entity in entities if entity['type'] == 'model']
+        model_entity_df = {}
+        model_entity_df['model'] = [entity['name'] for entity in model_entities]
+        property_names = model_entities[0]['property'].keys()
+        for property in property_names:
+            model_entity_df[property] = [entity['property'][property] for entity in model_entities]
+        self.model_desc.uniary_info = pd.DataFrame(model_entity_df)
+
+        dataset_binary_relations = [relation for relation in relations if relation['type'] == 'dataset_related']
+        dataset_binary_relation_df = {}
+        dataset_binary_relation_df['source_entity'] = [relation['source_entity'] for relation in dataset_binary_relations]
+        dataset_binary_relation_df['target_entity'] = [relation['target_entity'] for relation in dataset_binary_relations]
+        dataset_binary_relation_df['relation'] = [relation['property']['relation'] for relation in dataset_binary_relations]
+        self.dataset_desc.two_ary_info = pd.DataFrame(dataset_binary_relation_df)
+
+        model_binary_relations = [relation for relation in relations if relation['type'] == 'model_related']
+        model_binary_relation_df = {}
+        model_binary_relation_df['source_entity'] = [relation['source_entity'] for relation in model_binary_relations]
+        model_binary_relation_df['target_entity'] = [relation['target_entity'] for relation in model_binary_relations]
+        model_binary_relation_df['relation'] = [relation['property']['relation'] for relation in model_binary_relations]
+        self.model_desc.two_ary_info = pd.DataFrame(model_binary_relation_df)
+
+        model_hyper_relations = [relation for relation in relations if relation['type'] == 'model_dataset']
+        model_hyper_relation_df = {}
+        model_hyper_relation_df['source_entity'] = [relation['source_entity'] for relation in model_hyper_relations]
+        model_hyper_relation_df['target_entity'] = [relation['target_entity'] for relation in model_hyper_relations]
+        property_names = model_hyper_relations[0]['property'].keys()
+        for property in property_names:
+            model_hyper_relation_df[property] = [relation['property'][property] for relation in model_hyper_relations]
+        self.model_desc.hyper_relation_info = pd.DataFrame(model_hyper_relation_df)
+
 
     def get_knowledge_graph(self):
         return self.KG
 
     def summrize_knowledge_graph(self):
-        if not os.path.exists(self.kg_dir+"KGNAS.json"):
-            self.generate_knowledge_graph()
+        if not os.path.exists(self.kg_dir+"KGNAS_graph.json"):
+            self.generate_graph()
         else:
-            self.load_knowledge_graph(self.kg_dir)
+            self.load_graph(self.kg_dir)
             self.entities = set(self.KG.nodes)
     
         num_nodes = self.KG.number_of_nodes()

@@ -1,7 +1,7 @@
 from nas_bench_graph import light_read
 import pandas as pd
 import numpy as np
-
+import json
 from .HashDecoder import HashDecoder
 
 GNN_LIST = [
@@ -77,11 +77,12 @@ HARDWARE = {
 # hyper_parameter_description = {}
 
 class ModelDescription:
-    def __init__(self):
+    def __init__(self, kgdir='./KG/', load=False):
         self.datasets = []
         self.uniary_info = None
         self.two_ary_info = None
         self.hyper_relation_info = None
+        self.kgdir = kgdir
 
         self.hardware_df = pd.DataFrame(HARDWARE)
         self.hyper_param_df = pd.DataFrame(HYPER_PARAM)
@@ -91,6 +92,37 @@ class ModelDescription:
         self.model_structure_df = self._decompose_model()
 
         self.relation_names = None
+
+        if load:
+            with open(self.kg_dir+"KGNAS_knowledge_graph.json", 'r') as f:
+                knowledge_graph = json.load(f)
+
+            entities = knowledge_graph['entities']
+            relations = knowledge_graph['relations']
+
+            model_entities = [entity for entity in entities if entity['type'] == 'model']
+            model_entity_df = {}
+            model_entity_df['model'] = [entity['name'] for entity in model_entities]
+            property_names = model_entities[0]['property'].keys()
+            for property in property_names:
+                model_entity_df[property] = [entity['property'][property] for entity in model_entities]
+            self.uniary_info = pd.DataFrame(model_entity_df)
+
+            model_binary_relations = [relation for relation in relations if relation['type'] == 'model_related']
+            model_binary_relation_df = {}
+            model_binary_relation_df['source_entity'] = [relation['source_entity'] for relation in model_binary_relations]
+            model_binary_relation_df['target_entity'] = [relation['target_entity'] for relation in model_binary_relations]
+            model_binary_relation_df['relation'] = [relation['property']['relation'] for relation in model_binary_relations]
+            self.two_ary_info = pd.DataFrame(model_binary_relation_df)
+
+            model_hyper_relations = [relation for relation in relations if relation['type'] == 'model_dataset']
+            model_hyper_relation_df = {}
+            model_hyper_relation_df['source_entity'] = [relation['source_entity'] for relation in model_hyper_relations]
+            model_hyper_relation_df['target_entity'] = [relation['target_entity'] for relation in model_hyper_relations]
+            property_names = model_hyper_relations[0]['property'].keys()
+            for property in property_names:
+                model_hyper_relation_df[property] = [relation['property'][property] for relation in model_hyper_relations]
+            self.hyper_relation_info = pd.DataFrame(model_hyper_relation_df)
         
         self.prepare_knowledge_graph()
 

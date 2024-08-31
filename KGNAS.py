@@ -34,9 +34,10 @@ class KGNAS:
 
     """
 
-    def __init__(self, kg_dir='./KG/', numerical_weight=0.5, load=False):
+    def __init__(self, kg_dir='./KG/', numerical_weight=1.0, load=False):
         self.dataset_desc = DatasetDescription(kg_dir=kg_dir, load=load)
         self.model_desc = ModelDescription(kg_dir=kg_dir, load=load)
+        self.dataset_model_desc = pd.DataFrame()
         self.KG = nx.Graph()
 
         self.kg_dir = kg_dir
@@ -232,14 +233,15 @@ class KGNAS:
             return dataset_similarities_df[dataset_similarities_df['dataset'] != target_dataset_name].head(k)
 
         return dataset_similarities_df.head(top_k)
-    
-    def recommend_model(self, target_dataset_name, top_k_dataset=5, top_k_model=5, sim_metric='l2', score_metric='avg', include_target_dataset=True):
+
+    def recommend_model(self, target_dataset_name, top_k_dataset=5, style='global', top_k_model=5, sim_metric='l2', score_metric='avg', include_target_dataset=True):
         """
         Recommends models based on the target dataset and their performance information.
 
         Parameters:
             target_dataset_name (str): The name of the target dataset.
             top_k_dataset (int): The number of similar datasets to consider.
+            style (str): The recommendation style to use. Options are 'global' and 'local'.
             top_k_model (int): The number of top models to recommend for each similar dataset.
             score_metric (str): The scoring metric to use for recommendation. Options are 'avg' (average) and 'mult' (multiplication).
             include_target_dataset (bool): Flag to indicate whether to include the target dataset in the recommendations.
@@ -249,40 +251,50 @@ class KGNAS:
         """
         recommend_model_df = pd.DataFrame()
 
-        dataset_similarities_df = self.get_similar_dataset(target_dataset_name, top_k=top_k_dataset, sim_metric=sim_metric, include_target_dataset=include_target_dataset)
+        if style == 'local':
+            dataset_similarities_df = self.get_similar_dataset(target_dataset_name, top_k=top_k_dataset, sim_metric=sim_metric, include_target_dataset=include_target_dataset)
 
-        # Obtain the top-k models for each of the similar datasets with their performance information.
-        for _, row in dataset_similarities_df.iterrows():
-            temp_top_model_df = self.get_top_model_from_dataset(row['dataset'], top_k=top_k_model)
-            temp_top_model_df['dataset'] = row['dataset']
-            temp_top_model_df['dataset_similarity'] = row['dataset_similarity']
-            temp_top_model_df['standardized_perf'] = (temp_top_model_df['perf'] - temp_top_model_df['perf'].min()) / (temp_top_model_df['perf'].max() - temp_top_model_df['perf'].min())
-            if recommend_model_df.shape[0] == 0:
-                recommend_model_df = temp_top_model_df.copy(deep=True)
-            else:
-                recommend_model_df = pd.concat([recommend_model_df, temp_top_model_df])
+            # Obtain the top-k models for each of the similar datasets with their performance information.
+            for _, row in dataset_similarities_df.iterrows():
+                temp_top_model_df = self.get_top_model_from_dataset(row['dataset'], top_k=top_k_model)
+                temp_top_model_df['dataset'] = row['dataset']
+                temp_top_model_df['dataset_similarity'] = row['dataset_similarity']
+                temp_top_model_df['standardized_perf'] = (temp_top_model_df['perf'] - temp_top_model_df['perf'].min()) / (temp_top_model_df['perf'].max() - temp_top_model_df['perf'].min())
+                if recommend_model_df.shape[0] == 0:
+                    recommend_model_df = temp_top_model_df.copy(deep=True)
+                else:
+                    recommend_model_df = pd.concat([recommend_model_df, temp_top_model_df])
 
-        recommend_model_df['model'] = recommend_model_df['model'].apply(lambda x: str(x))
+            recommend_model_df['model'] = recommend_model_df['model'].apply(lambda x: str(x))
 
-        # Join binary information
-        for relation in self.model_desc.two_ary_info['relation'].unique():
-            temp_df = self.model_desc.two_ary_info[self.model_desc.two_ary_info['relation'] == relation][['source_entity', 'target_entity']].rename(columns={'source_entity': 'model', 'target_entity': relation})
-            recommend_model_df = pd.merge(recommend_model_df, temp_df, left_on='model', right_on='model', how='left')
+            # Join binary information
+            for relation in self.model_desc.two_ary_info['relation'].unique():
+                temp_df = self.model_desc.two_ary_info[self.model_desc.two_ary_info['relation'] == relation][['source_entity', 'target_entity']].rename(columns={'source_entity': 'model', 'target_entity': relation})
+                recommend_model_df = pd.merge(recommend_model_df, temp_df, left_on='model', right_on='model', how='left')
+            
+            # Join uniary information
+            recommend_model_df = recommend_model_df.join(self.model_desc.uniary_info.set_index('model'), on='model', how='left')
+
+            # Calculate the hybrid score combining the similarity and performances for comprehensive recommendation.
+            dataset_similarity = recommend_model_df['dataset_similarity'].to_numpy()
+            dataset_similarity = (dataset_similarity - dataset_similarity.min()) / (dataset_similarity.max() - dataset_similarity.min())
+            
+            # Standardize the models based on their interial performance with the dataset.
+            perf = recommend_model_df['standardized_perf'].to_numpy()
+            
+            if score_metric == 'avg':
+                recommend_model_df['score'] = (dataset_similarity + perf) / 2
+            if score_metric == 'mult':
+                recommend_model_df['score'] = dataset_similarity * perf
         
-        # Join uniary information
-        recommend_model_df = recommend_model_df.join(self.model_desc.uniary_info.set_index('model'), on='model', how='left')
+        if style == 'global':
+            dataset_similarities_df = self.get_similar_dataset(target_dataset_name, top_k=top_k_dataset, sim_metric=sim_metric, include_target_dataset=include_target_dataset)
+            
+            top_datasets = dataset_similarities_df['dataset'].to_list()
+            related_models = self.model_desc.hyper_relation_info.loc[self.model_desc.hyper_relation_info['source_entity'] in top_datasets].copy(deep=True)
 
-        # Calculate the hybrid score combining the similarity and performances for comprehensive recommendation.
-        dataset_similarity = recommend_model_df['dataset_similarity'].to_numpy()
-        dataset_similarity = (dataset_similarity - dataset_similarity.min()) / (dataset_similarity.max() - dataset_similarity.min())
-        
-        # Standardize the models based on their interial performance with the dataset.
-        perf = recommend_model_df['standardized_perf'].to_numpy()
-        
-        if score_metric == 'avg':
-            recommend_model_df['score'] = (dataset_similarity + perf) / 2
-        if score_metric == 'mult':
-            recommend_model_df['score'] = dataset_similarity * perf
+            
+
 
         return recommend_model_df
         
@@ -339,42 +351,74 @@ class KGNAS:
             self.KG = nx.node_link_graph(data)
 
     def save_knowledge_graph(self):
-        entities = []
-        relations = []
+        self.dataset_desc.generate_knowledge_graph()
+        self.model_desc.generate_knowledge_graph()
 
-        for row in self.dataset_desc.uniary_info.iterrows():
-            row_dict = {'name': row['dataset'], 'type': 'dataset', 'property': row.drop('dataset').to_dict()}
-            entities.append(row_dict)
+        entities = pd.concat([self.dataset_desc.entities, self.model_desc.entities]).drop_duplicates(subset=['name', 'macro_type', 'micro_type'])
+        relations = pd.concat([self.dataset_desc.relations, self.model_desc.relations])
 
-        for row in self.model_desc.uniary_info.iterrows():
-            row_dict = {'name': row['model'], 'type': 'model', 'property': row.drop('model').to_dict()}
-            entities.append(row_dict)
+        entities['id'] = range(len(entities))
+        relations['id'] = range(len(relations))
 
-        for row in self.dataset_desc.two_ary_info.iterrows():
-            row_dict = {'source_entity': row['source_entity'], 'target_entity': row['target_entity'], 'type': 'dataset_related', 'property': {'relation': row['relation']}}
-            relations.append(row_dict)
+        entity_name_to_id = {name: id for name, id in zip(entities['name'], entities['id'])}
 
-        for row in self.model_desc.two_ary_info.iterrows():
-            row_dict = {'source_entity': row['source_entity'], 'target_entity': row['target_entity'], 'type': 'model_related', 'property': {'relation': row['relation']}}
-            relations.append(row_dict)
+        relations['target_entity'] = relations['target_entity'].apply(lambda x: entity_name_to_id[x])
+        relations['source_entity'] = relations['source_entity'].apply(lambda x: entity_name_to_id[x])
 
-        for row in self.model_desc.hyper_relation_info.iterrows():
-            row_dict = {'source_entity': row['source_entity'], 'target_entity': row['target_entity'], 'type': 'model_dataset', 'property': row.drop(['source_entity', 'target_entity']).to_dict()}
-            relations.append(row_dict)
+        print('num macro types', len(entities['macro_type'].unique()))
+        print('num micro types', len(entities['micro_type'].unique()))
+        print('num entities', len(entities))
 
-        knowledge_graph = {'entities': entities, 'relations': relations}
+        print('num relation types', len(relations['relation'].unique()))
+        print('num relations', len(relations))
 
-        with open(self.kg_dir+"KGNAS_knowledge_graph.json", 'w') as f:
-            json.dump(knowledge_graph, f)
+        # for row in self.dataset_desc.uniary_info.iterrows():
+        #     row_dict = {'name': row['dataset'], 'macro_type': 'dataset', 'micro_type': 'dataset', 'property': row.drop('dataset').to_dict()}
+        #     entities.append(row_dict)
+
+        # for row in self.model_desc.uniary_info.iterrows():
+        #     row_dict = {'name': row['model'], 'macro_type': 'model', 'micro_type': 'model', 'property': row.drop('model').to_dict()}
+        #     entities.append(row_dict)
+
+        # for row in self.dataset_desc.two_ary_info.iterrows():
+        #     row_dict = {'name': row['target_entity'], 'macro_type': 'dataset', 'micro_type': row['relation'][4:], 'property': None}
+        
+        # for row in self.model_desc.two_ary_info.iterrows():
+        #     row_dict = {'name': row['target_entity'], 'macro_type': 'model', 'micro_type': row['relation'][4:], 'property': None}
+
+        # for row in self.dataset_desc.two_ary_info.iterrows():
+        #     row_dict = {'source_entity': row['source_entity'], 'target_entity': row['target_entity'], 'type': 'dataset_related', 'property': {'relation': row['relation']}}
+        #     relations.append(row_dict)
+
+        # for row in self.model_desc.two_ary_info.iterrows():
+        #     row_dict = {'source_entity': row['source_entity'], 'target_entity': row['target_entity'], 'type': 'model_related', 'property': {'relation': row['relation']}}
+        #     relations.append(row_dict)
+
+        # for row in self.model_desc.hyper_relation_info.iterrows():
+        #     row_dict = {'source_entity': row['source_entity'], 'target_entity': row['target_entity'], 'type': 'model_dataset', 'property': row.drop(['source_entity', 'target_entity']).to_dict()}
+        #     relations.append(row_dict)
+
+        # knowledge_graph = {'entities': entities, 'relations': relations}
+
+        with open(self.kg_dir+"KGNAS_knowledge_graph_entities.json", 'w') as f:
+            json.dump(entities.to_dict('records'), f)
+
+        with open(self.kg_dir+"KGNAS_knowledge_graph_relations.json", 'w') as f:
+            json.dump(relations.to_dict('records'), f)
 
     def load_knowledge_graph(self):
-        with open(self.kg_dir+"KGNAS_knowledge_graph.json", 'r') as f:
-            knowledge_graph = json.load(f)
+        with open(self.kg_dir+"KGNAS_knowledge_graph_entities.json", 'r') as f:
+            entities = json.load(f)
+        
+        with open(self.kg_dir+"KGNAS_knowledge_graph_relations.json", 'r') as f:
+            relations = json.load(f)
 
-        entities = knowledge_graph['entities']
-        relations = knowledge_graph['relations']
+        entity_id_to_name = {id: name for id, name in zip([entity['id'] for entity in entities], [entity['name'] for entity in entities])}
 
-        dataset_entities = [entity for entity in entities if entity['type'] == 'dataset']
+        # entities = knowledge_graph['entities']
+        # relations = knowledge_graph['relations']
+
+        dataset_entities = [entity for entity in entities if entity['macro_type'] == 'dataset']
         dataset_entity_df = {}
         dataset_entity_df['dataset'] = [entity['name'] for entity in dataset_entities]
         property_names = dataset_entities[0]['property'].keys()
@@ -382,7 +426,7 @@ class KGNAS:
             dataset_entity_df[property] = [entity['property'][property] for entity in dataset_entities]
         self.dataset_desc.uniary_info = pd.DataFrame(dataset_entity_df)
 
-        model_entities = [entity for entity in entities if entity['type'] == 'model']
+        model_entities = [entity for entity in entities if entity['macro_type'] == 'model']
         model_entity_df = {}
         model_entity_df['model'] = [entity['name'] for entity in model_entities]
         property_names = model_entities[0]['property'].keys()
@@ -390,29 +434,28 @@ class KGNAS:
             model_entity_df[property] = [entity['property'][property] for entity in model_entities]
         self.model_desc.uniary_info = pd.DataFrame(model_entity_df)
 
-        dataset_binary_relations = [relation for relation in relations if relation['type'] == 'dataset_related']
+        dataset_binary_relations = [relation for relation in relations if relation['macro_type'] == 'dataset']
         dataset_binary_relation_df = {}
-        dataset_binary_relation_df['source_entity'] = [relation['source_entity'] for relation in dataset_binary_relations]
-        dataset_binary_relation_df['target_entity'] = [relation['target_entity'] for relation in dataset_binary_relations]
-        dataset_binary_relation_df['relation'] = [relation['property']['relation'] for relation in dataset_binary_relations]
+        dataset_binary_relation_df['source_entity'] = [entity_id_to_name[relation['source_entity']] for relation in dataset_binary_relations]
+        dataset_binary_relation_df['target_entity'] = [entity_id_to_name[relation['target_entity']] for relation in dataset_binary_relations]
+        dataset_binary_relation_df['relation'] = [relation['relation'] for relation in dataset_binary_relations]
         self.dataset_desc.two_ary_info = pd.DataFrame(dataset_binary_relation_df)
 
-        model_binary_relations = [relation for relation in relations if relation['type'] == 'model_related']
+        model_binary_relations = [relation for relation in relations if relation['macro_type'] == 'model' and relation['property'] == None]
         model_binary_relation_df = {}
-        model_binary_relation_df['source_entity'] = [relation['source_entity'] for relation in model_binary_relations]
-        model_binary_relation_df['target_entity'] = [relation['target_entity'] for relation in model_binary_relations]
-        model_binary_relation_df['relation'] = [relation['property']['relation'] for relation in model_binary_relations]
+        model_binary_relation_df['source_entity'] = [entity_id_to_name[relation['source_entity']] for relation in model_binary_relations]
+        model_binary_relation_df['target_entity'] = [entity_id_to_name[relation['target_entity']] for relation in model_binary_relations]
+        model_binary_relation_df['relation'] = [relation['relation'] for relation in model_binary_relations]
         self.model_desc.two_ary_info = pd.DataFrame(model_binary_relation_df)
 
-        model_hyper_relations = [relation for relation in relations if relation['type'] == 'model_dataset']
+        model_hyper_relations = [relation for relation in relations if relation['macro_type'] == 'model' and relation['property'] != None]
         model_hyper_relation_df = {}
-        model_hyper_relation_df['source_entity'] = [relation['source_entity'] for relation in model_hyper_relations]
-        model_hyper_relation_df['target_entity'] = [relation['target_entity'] for relation in model_hyper_relations]
+        model_hyper_relation_df['source_entity'] = [entity_id_to_name[relation['source_entity']] for relation in model_hyper_relations]
+        model_hyper_relation_df['target_entity'] = [entity_id_to_name[relation['target_entity']] for relation in model_hyper_relations]
         property_names = model_hyper_relations[0]['property'].keys()
         for property in property_names:
             model_hyper_relation_df[property] = [relation['property'][property] for relation in model_hyper_relations]
         self.model_desc.hyper_relation_info = pd.DataFrame(model_hyper_relation_df)
-
 
     def get_knowledge_graph(self):
         return self.KG

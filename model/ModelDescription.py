@@ -73,26 +73,36 @@ HARDWARE = {
         ]
 }
 
+SENANTICS = {
+    "dataset": ['cora', 'citeseer', 'pubmed', 'cs', 'physics', 'photo', 'computers', 'arxiv', 'proteins'],
+    "task": ['Node Classification', 'Node Classification', 'Node Classification', 'Node Classification', 'Node Classification', 'Node Classification', 'Node Classification', 'Node Classification', 'Node Classification'], 
+    "modality": ['Graph', 'Graph', 'Graph', 'Graph', 'Graph', 'Graph', 'Graph', 'Graph', 'Graph'],
+}
+
 # structure_description = {}
 # hyper_parameter_description = {}
 
 class ModelDescription:
-    def __init__(self, kgdir='./KG/', load=False):
+    def __init__(self, kg_dir='./KG/', load=False):
         self.datasets = []
         self.uniary_info = None
         self.two_ary_info = None
         self.hyper_relation_info = None
-        self.kgdir = kgdir
+        self.kg_dir = kg_dir
 
         self.hardware_df = pd.DataFrame(HARDWARE)
         self.hyper_param_df = pd.DataFrame(HYPER_PARAM)
-        self.data_related_df = pd.concat([self.hardware_df, self.hyper_param_df.drop('dataset', axis=1)], axis=1)
+        self.semantic_df = pd.DataFrame(SENANTICS)
+        self.data_related_df = pd.concat([self.hardware_df, self.hyper_param_df.drop('dataset', axis=1), self.semantic_df.drop('dataset', axis=1)], axis=1)
 
         self.bench_df = self._read_bench_data()
         self.model_structure_df = self._decompose_model()
 
         self.relation_names = None
 
+        self.entities = None
+        self.relations = None
+        
         if load:
             with open(self.kg_dir+"KGNAS_knowledge_graph.json", 'r') as f:
                 knowledge_graph = json.load(f)
@@ -138,6 +148,7 @@ class ModelDescription:
         self.relation_names = {}
         self.relation_names['hyper_param'] = [key for key in HYPER_PARAM.keys() if key != 'dataset']
         self.relation_names['hardware'] = [key for key in HARDWARE.keys() if key != 'dataset']
+        self.relation_names['task'] = [key for key in SENANTICS.keys() if key != 'dataset']
         self.relation_names['performance'] = [col for col in self.bench_df.columns if col not in ['dataset', 'model']]
         self.relation_names['structure'] = [col for col in self.model_structure_df.columns if col not in ['dataset', 'model']]
 
@@ -175,8 +186,54 @@ class ModelDescription:
 
         # Hyper relation information
         self.hyper_relation_info = data_model_df[['dataset', 'model'] + performance_columns].copy(deep=True)
+        for col in ['perf', 'valid_perf', 'latency', 'para']:
+            for dataset in self.hyper_relation_info['dataset'].unique():
+                self.hyper_relation_info.loc[self.hyper_relation_info['dataset'] == dataset, col+'_rank'] = self.hyper_relation_info[self.hyper_relation_info['dataset'] == dataset][col].rank(ascending=False, method='average')
+                self.hyper_relation_info.loc[self.hyper_relation_info['dataset'] == dataset, col+'_top_diff'] = self.hyper_relation_info[self.hyper_relation_info['dataset'] == dataset][col].max() - self.hyper_relation_info[self.hyper_relation_info['dataset'] == dataset][col]
+                self.hyper_relation_info.loc[self.hyper_relation_info['dataset'] == dataset, col+'_mid_diff'] = self.hyper_relation_info[self.hyper_relation_info['dataset'] == dataset][col].median() - self.hyper_relation_info[self.hyper_relation_info['dataset'] == dataset][col]
         self.hyper_relation_info.rename(columns={'dataset': 'source_entity', 'model': 'target_entity'}, inplace=True)
         self.hyper_relation_info['relation'] = 'has_performance'
+        self.hyper_relation_info['task'] = 'Node Classification'
+
+    def generate_knowledge_graph(self):
+        self.entities = self.uniary_info.copy(deep=True)
+        self.entities['macro_type'] = 'model'
+        self.entities['micro_type'] = 'model'
+        self.entities['property'] = [row.drop('model').to_dict() for idx, row in self.uniary_info.iterrows()]
+        # self.entities['id'] = ['model_model_' + str(i) for i in range(len(self.uniary_info))]
+        self.entities.rename(columns={'model': 'name'}, inplace=True)
+        self.entities = self.entities[['name', 'macro_type', 'micro_type', 'property']]
+        
+        temp_entities = self.two_ary_info.copy(deep=True)
+        temp_entities['macro_type'] = ['model' if row['relation'] not in ['has_task', 'has_modality'] else row['relation'][4:] for idx, row in temp_entities.iterrows()]
+        temp_entities['micro_type'] = temp_entities['relation'].apply(lambda x: x[4:])
+        temp_entities['property'] = None
+        # temp_entities['id'] = ['model_' + row['micro_type'] + str(idx) for idx, row in temp_entities.iterrows() if row['micro_type'] not in ['task', 'modality']]
+        temp_entities.rename(columns={'target_entity': 'name'}, inplace=True)
+        temp_entities = temp_entities[['name', 'macro_type', 'micro_type', 'property']]
+
+        self.entities = pd.concat([self.entities, temp_entities])
+
+        self.relations = self.two_ary_info.copy(deep=True)
+
+        # self.relations['target_entity'] = self.relations['target_entity'].apply(lambda x: self.entities[self.entities['name'] == x]['id'].values[0])
+        # self.relations['source_entity'] = self.relations['source_entity'].apply(lambda x: self.entities[self.entities['name'] == x]['id'].values[0])
+        # self.relations['id'] = ['model_' + row['relation'] + str(idx) for idx, row in self.relations.iterrows()]
+        self.relations['property'] = None
+        self.relations['macro_type'] = 'model'
+
+        self.relations = self.relations[['source_entity', 'target_entity', 'macro_type', 'relation', 'property']]
+
+        temp_relations = self.hyper_relation_info.copy(deep=True)
+        # temp_relations['source_entity'] = temp_relations['source_entity'].apply(lambda x: self.entities[self.entities['name'] == x]['id'].values[0])
+        # temp_relations['target_entity'] = temp_relations['target_entity'].apply(lambda x: self.entities[self.entities['name'] == x]['id'].values[0])
+        # temp_relations['id'] = ['model_performance_' + str(idx) for idx, row in temp_relations.iterrows()]
+        temp_relations['property'] = [row.drop(['source_entity', 'target_entity', 'relation']).to_dict() for idx, row in temp_relations.iterrows()]
+        temp_relations['macro_type'] = 'model'
+
+        temp_relations = temp_relations[['source_entity', 'target_entity', 'macro_type', 'relation', 'property']]
+
+        self.relations = pd.concat([self.relations, temp_relations])
 
     def _read_bench_data(self):
         dnames = ['cora', 'citeseer', 'pubmed', 'cs', 'physics', 'photo', 'computers', 'arxiv', 'proteins']

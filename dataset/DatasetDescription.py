@@ -15,7 +15,7 @@ EXISTING_DESCRIPTION = {
     'num_classes': [7, 6, 3, 15, 5, 8, 10, 40, 112], 
     'density': [0.0014399999126942077, 0.0008227297529768376, 0.00022803908825811382, 0.00048734744416454727, 0.0004168365381774087, 0.004070112116838717, 0.0026002762758509414, 8.074789913670332e-05, 0.004504521754591681], 
     'average_eigenvector_centrality': [0.0047865456098027765, 0.0033854307488708703, 0.0014101036104415428, 0.0023585311444032655, 0.0016277767776128051, 0.004240506438932563, 0.0033683404991575005, 0.0007299364762486809, 0.0005329522847746617], 
-    # 'task': ['Node Classification', 'Node Classification', 'Node Classification', 'Node Classification', 'Node Classification', 'Node Classification', 'Node Classification', 'Node Classification', 'Node Classification'], 
+    'task': ['Node Classification', 'Node Classification', 'Node Classification', 'Node Classification', 'Node Classification', 'Node Classification', 'Node Classification', 'Node Classification', 'Node Classification'], 
     'local_average_closeness_centrality': [1.0, 0.4697435587367421, 0.4524748732421055, 0.4244744169883969, 0.30603317639876243, 0.3746486414543327, 0.3940379176382557, 0.3338630446056274, 0.5694732422316185], 
     'node_count': [2708, 3327, 19717, 18333, 34493, 7650, 13752, 169343, 132534], 
     'average_degree': [3.8980797636632203, 2.7363991584009617, 4.496018664096972, 8.93405334642448, 14.37752587481518, 31.132287581699348, 35.7563990692263, 13.674010735607613, 596.9977817012993], 
@@ -28,16 +28,20 @@ EXISTING_DESCRIPTION = {
     'local_average_shortest_path_length': [1.0, 2.1947368421052635, 2.251893939393939, 2.4174972314507195, 3.2955307262569833, 2.69797184294598, 2.5689061717099104, 3.0616131441374166, 1.7665342163355409],
     # 'edge_semantic': ['Citation', 'Citation', 'Citation', 'Coauthor', 'Coauthor', 'Coappearance', 'Coappearance', 'Citation', 'Biological Interaction'], 
     'domain': ['Computer Science', 'Computer Science', 'Medical', 'Computer Science', 'Physics', 'Business', 'Business', 'Computer Science', 'Medical'], 
+    'modality': ['Graph', 'Graph', 'Graph', 'Graph', 'Graph', 'Graph', 'Graph', 'Graph', 'Graph'],
 }
 
 class DatasetDescription:
-    def __init__(self, descriptions=EXISTING_DESCRIPTION, kgdir='./KG/', load=False):
+    def __init__(self, descriptions=EXISTING_DESCRIPTION, kg_dir='./KG/', load=False):
         self.descriptions = descriptions
         self.datasets = []
         self.uniary_info = None
         self.two_ary_info = None
 
-        self.kgdir = kgdir
+        self.entities = None
+        self.relations = None
+
+        self.kg_dir = kg_dir
 
         if load:
             with open(self.kg_dir+"KGNAS_knowledge_graph.json", 'r') as f:
@@ -105,9 +109,36 @@ class DatasetDescription:
             temp_df['relation'] = 'has_' + col.replace(' ', '_')
             temp_df.rename(columns={col: 'target_entity', 'dataset': 'source_entity'}, inplace=True)
             self.two_ary_info = pd.concat([self.two_ary_info, temp_df])
-
-        # self.two_ary_info = pd.concat([data_description_df[['dataset']], self.two_ary_info], axis=1)
     
+    def generate_knowledge_graph(self):
+        self.entities = self.uniary_info.copy(deep=True)
+        self.entities['macro_type'] = 'dataset'
+        self.entities['micro_type'] = 'dataset'
+        self.entities['property'] = [row.drop('dataset').to_dict() for idx, row in self.uniary_info.iterrows()]
+        # self.entities['id'] = ['dataset_dataset_' + str(i) for i in range(len(self.uniary_info))]
+        self.entities.rename(columns={'dataset': 'name'}, inplace=True)
+        self.entities = self.entities[['name', 'macro_type', 'micro_type', 'property']]
+        
+        temp_entities = self.two_ary_info.copy(deep=True)
+        temp_entities['macro_type'] = ['dataset' if row['relation'] not in ['has_task', 'has_modality'] else row['relation'][4:] for idx, row in temp_entities.iterrows()]
+        temp_entities['micro_type'] = temp_entities['relation'].apply(lambda x: x[4:])
+        temp_entities['property'] = None
+        # temp_entities['id'] = ['dataset_' + row['micro_type'] + str(idx) for idx, row in temp_entities.iterrows()]
+        temp_entities.rename(columns={'target_entity': 'name'}, inplace=True)
+        temp_entities = temp_entities[['name', 'macro_type', 'micro_type', 'property']]
+
+        self.entities = pd.concat([self.entities, temp_entities])
+
+        self.relations = self.two_ary_info.copy(deep=True)
+
+        # self.relations['target_entity'] = self.relations['target_entity'].apply(lambda x: self.entities[self.entities['name'] == x]['id'].values[0])
+        # self.relations['source_entity'] = self.relations['source_entity'].apply(lambda x: self.entities[self.entities['name'] == x]['id'].values[0])
+        # self.relations['id'] = ['dataset_' + row['relation'] + str(idx) for idx, row in self.relations.iterrows()]
+        self.relations['property'] = None
+        self.relations['macro_type'] = 'dataset'
+        
+        self.relations = self.relations[['source_entity', 'target_entity', 'macro_type', 'relation', 'property']]
+
     def get_KG_components(self):
         return self.uniary_info, self.two_ary_info
     

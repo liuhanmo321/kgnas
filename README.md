@@ -88,7 +88,16 @@ sim_metric = 'gower'
 score_metric = 'avg'
 include_target_dataset = False
 
-print(kgnas.recommend_model('cora', 5, 15, 'gower', 'avg', include_target_dataset=False))
+candidate_df = kgnas.recommend_model('cora', top_k_dataset=3, top_k_model=5, sim_metric='gower', score_metric='avg', include_target_dataset=True)
+
+candidate_model = candidate_df.iloc[0]
+print(candidate_model)
+
+# STEP6: Get the similar models of the given model based on the candidate_df from the last step. To make the recommendation more effective, it is recommended to enlarge the candidate pool from the last step.
+# The similarity is calculated based on three parts: the structural similarity, the hyperparameters similarity and the model performance similarity, their weights are currently 1:1:4 towards the final similarity.
+similar_model_df = kgnas.get_similar_model(candidate_model, candidate_df, topk=5, sim_metric='l2', sim_weights=[1, 1, 4])
+
+print(similar_model_df.head())
 
 # The topology is in the key: 'has_struct_topology', and the structure of each layer is in the keys: 'has_struct_1', 'has_struct_2', 'has_struct_3', 'has_struct_4'
 

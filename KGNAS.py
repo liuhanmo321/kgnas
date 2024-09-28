@@ -234,7 +234,7 @@ class KGNAS:
 
         return dataset_similarities_df.head(top_k)
 
-    def recommend_model(self, target_dataset_name, top_k_dataset=5, style='global', top_k_model=5, sim_metric='l2', score_metric='avg', include_target_dataset=True):
+    def recommend_model(self, target_dataset_name, top_k_dataset=5, top_k_model=5, sim_metric='l2', score_metric='avg', include_target_dataset=True, style='local'):
         """
         Recommends models based on the target dataset and their performance information.
 
@@ -290,11 +290,17 @@ class KGNAS:
         if style == 'global':
             dataset_similarities_df = self.get_similar_dataset(target_dataset_name, top_k=top_k_dataset, sim_metric=sim_metric, include_target_dataset=include_target_dataset)
             
-            top_datasets = dataset_similarities_df['dataset'].to_list()
-            related_models = self.model_desc.hyper_relation_info.loc[self.model_desc.hyper_relation_info['source_entity'] in top_datasets].copy(deep=True)
-
+            similar_datasets = dataset_similarities_df['dataset'].to_list()
+            print(dataset_similarities_df)
             
+            related_models = self.model_desc.hyper_relation_info.loc[self.model_desc.hyper_relation_info['source_entity'].isin(similar_datasets)].copy(deep=True)
 
+            related_models['dataset_similarity'] = related_models['source_entity'].apply(lambda x: dataset_similarities_df[dataset_similarities_df['dataset'] == x]['dataset_similarity'].values[0])
+            related_models['weighted_score'] = related_models['perf_score'] * related_models['dataset_similarity']
+
+            related_models['norm_target_entity'] = related_models['target_entity'].apply(lambda x: x[1:])
+
+            recommend_model_df = related_models.groupby('norm_target_entity').agg({'weighted_score': 'mean'}).reset_index()
 
         return recommend_model_df
         
@@ -311,7 +317,8 @@ class KGNAS:
         - top_model_df (DataFrame): A DataFrame containing the top models and their corresponding performance metric.
         """
         top_model_df = self.model_desc.hyper_relation_info[self.model_desc.hyper_relation_info['source_entity'] == dataset_name].sort_values(by=perf_metric, ascending=False).head(top_k).copy(deep=True)
-        top_model_df = top_model_df[['target_entity', perf_metric]]
+        top_model_df = top_model_df.drop(columns=['source_entity'])
+
         top_model_df.sort_values(by=perf_metric, ascending=False, inplace=True)
         top_model_df.rename(columns={'target_entity': 'model'}, inplace=True)
 
@@ -460,8 +467,8 @@ class KGNAS:
     def get_knowledge_graph(self):
         return self.KG
 
-    def summrize_knowledge_graph(self):
-        if not os.path.exists(self.kg_dir+"KGNAS_graph.json"):
+    def summrize_knowledge_graph(self, generate=False):
+        if not os.path.exists(self.kg_dir+"KGNAS_graph.json") or generate:
             self.generate_graph()
         else:
             self.load_graph(self.kg_dir)

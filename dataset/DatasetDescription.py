@@ -29,6 +29,7 @@ EXISTING_DESCRIPTION = {
     # 'edge_semantic': ['Citation', 'Citation', 'Citation', 'Coauthor', 'Coauthor', 'Coappearance', 'Coappearance', 'Citation', 'Biological Interaction'], 
     'domain': ['Computer Science', 'Computer Science', 'Medical', 'Computer Science', 'Physics', 'Business', 'Business', 'Computer Science', 'Medical'], 
     'modality': ['Graph', 'Graph', 'Graph', 'Graph', 'Graph', 'Graph', 'Graph', 'Graph', 'Graph'],
+    'description': [None, None, None, None, None, None, None, None, None],
 }
 
 class DatasetDescription:
@@ -96,10 +97,12 @@ class DatasetDescription:
 
         description_names = list(data_description_df.columns)
         # print(description_names)
-        description_names.remove('dataset')
+        uniary_special_names = ['dataset', 'description']
+        for name in uniary_special_names:
+            description_names.remove(name)
         # Uniary information
         self.uniary_info = data_description_df[description_names].select_dtypes(include=['number'])
-        self.uniary_info = pd.concat([data_description_df['dataset'], self.uniary_info], axis=1)
+        self.uniary_info = pd.concat([data_description_df[uniary_special_names], self.uniary_info], axis=1)
 
         # Two-ary information
         temp_two_ary_info = data_description_df[description_names].select_dtypes(include=['object'])

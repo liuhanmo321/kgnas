@@ -148,7 +148,7 @@ class ModelDescription:
         self.relation_names = {}
         self.relation_names['hyper_param'] = [key for key in HYPER_PARAM.keys() if key != 'dataset']
         self.relation_names['hardware'] = [key for key in HARDWARE.keys() if key != 'dataset']
-        self.relation_names['task'] = [key for key in SENANTICS.keys() if key != 'dataset']
+        self.relation_names['semantics'] = [key for key in SENANTICS.keys() if key != 'dataset']
         self.relation_names['performance'] = [col for col in self.bench_df.columns if col not in ['dataset', 'model']]
         self.relation_names['structure'] = [col for col in self.model_structure_df.columns if col not in ['dataset', 'model']]
 
@@ -159,6 +159,7 @@ class ModelDescription:
         all_column_names = list(data_model_df.columns)
         performance_columns = ['valid_perf', 'perf', 'latency', 'para']
         non_performance_columns = [col for col in all_column_names if col not in performance_columns + ['dataset', 'model']]
+        # print(non_performance_columns)
 
         dataset_to_index = {dname: i for i, dname in enumerate(data_model_df['dataset'].unique())}
         data_model_df['indicator'] = data_model_df['dataset'].apply(lambda x: str(dataset_to_index[x]))
@@ -166,6 +167,7 @@ class ModelDescription:
         data_model_df.drop('indicator', axis=1, inplace=True)
 
         # Uniary information
+        # uniary_special_columns = ['model']
         self.uniary_info = data_model_df[non_performance_columns].select_dtypes(include=['number']).copy(deep=True)
         self.uniary_info = pd.concat([data_model_df['model'], self.uniary_info], axis=1)
 
@@ -176,24 +178,37 @@ class ModelDescription:
             relation = 'has_' + col.replace(' ', '_')
             for relation_type in self.relation_names.keys():
                 if col in self.relation_names[relation_type]:
-                    self.relation_names[relation_type].remove(col)
                     self.relation_names[relation_type].append(relation)
+                    self.relation_names[relation_type].remove(col)
 
             temp_df = pd.concat([data_model_df['model'], temp_two_ary_info[col]], axis=1)
             temp_df['relation'] = relation
             temp_df.rename(columns={col: 'target_entity', 'model': 'source_entity'}, inplace=True)
             self.two_ary_info = pd.concat([self.two_ary_info, temp_df])
 
+        for relation_type in self.relation_names.keys():
+            # Create a new list to store relations that should be kept
+            new_relations = []
+            for relation in self.relation_names[relation_type]:
+                if relation in list(self.two_ary_info['relation'].unique()):
+                    new_relations.append(relation)
+            # Replace the original list with the new list
+            self.relation_names[relation_type] = new_relations
+            
         # Hyper relation information
         self.hyper_relation_info = data_model_df[['dataset', 'model'] + performance_columns].copy(deep=True)
-        for col in ['perf', 'valid_perf', 'latency', 'para']:
-            for dataset in self.hyper_relation_info['dataset'].unique():
-                self.hyper_relation_info.loc[self.hyper_relation_info['dataset'] == dataset, col+'_rank'] = self.hyper_relation_info[self.hyper_relation_info['dataset'] == dataset][col].rank(ascending=False, method='average')
-                self.hyper_relation_info.loc[self.hyper_relation_info['dataset'] == dataset, col+'_top_diff'] = self.hyper_relation_info[self.hyper_relation_info['dataset'] == dataset][col].max() - self.hyper_relation_info[self.hyper_relation_info['dataset'] == dataset][col]
-                self.hyper_relation_info.loc[self.hyper_relation_info['dataset'] == dataset, col+'_mid_diff'] = self.hyper_relation_info[self.hyper_relation_info['dataset'] == dataset][col].median() - self.hyper_relation_info[self.hyper_relation_info['dataset'] == dataset][col]
+        for dataset in self.hyper_relation_info['dataset'].unique():
+            for col in ['perf', 'valid_perf', 'latency', 'para']:
+                self.hyper_relation_info.loc[self.hyper_relation_info['dataset'] == dataset, col+'_rank'] = self.hyper_relation_info[self.hyper_relation_info['dataset'] == dataset][col].rank(ascending=True, method='average')
+                self.hyper_relation_info.loc[self.hyper_relation_info['dataset'] == dataset, col+'_rank'] = self.hyper_relation_info.loc[self.hyper_relation_info['dataset'] == dataset, col+'_rank'] / self.hyper_relation_info[self.hyper_relation_info['dataset'] == dataset][col].count()
+                self.hyper_relation_info.loc[self.hyper_relation_info['dataset'] == dataset, col+'_top_diff'] = 1 - (self.hyper_relation_info[self.hyper_relation_info['dataset'] == dataset][col].max() - self.hyper_relation_info[self.hyper_relation_info['dataset'] == dataset][col]) / self.hyper_relation_info[self.hyper_relation_info['dataset'] == dataset][col].max()
+            
+                self.hyper_relation_info.loc[self.hyper_relation_info['dataset'] == dataset, col+'_score'] = (self.hyper_relation_info[self.hyper_relation_info['dataset'] == dataset][col] + self.hyper_relation_info[self.hyper_relation_info['dataset'] == dataset][col+'_rank'] + self.hyper_relation_info[self.hyper_relation_info['dataset'] == dataset][col+'_top_diff']) / 3
+                # self.hyper_relation_info.loc[self.hyper_relation_info['dataset'] == dataset, col+'_mid_diff'] = self.hyper_relation_info[self.hyper_relation_info['dataset'] == dataset][col].median() - self.hyper_relation_info[self.hyper_relation_info['dataset'] == dataset][col]
         self.hyper_relation_info.rename(columns={'dataset': 'source_entity', 'model': 'target_entity'}, inplace=True)
         self.hyper_relation_info['relation'] = 'has_performance'
         self.hyper_relation_info['task'] = 'Node Classification'
+        self.hyper_relation_info['structure_id'] = self.hyper_relation_info['target_entity'].apply(lambda x: x[1:])
 
     def generate_knowledge_graph(self):
         self.entities = self.uniary_info.copy(deep=True)

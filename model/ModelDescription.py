@@ -90,6 +90,8 @@ class ModelDescription:
         self.hyper_relation_info = None
         self.kg_dir = kg_dir
 
+        self.decoder = HashDecoder(GNN_LIST, GNN_LIST_PROTEINS)
+
         self.hardware_df = pd.DataFrame(HARDWARE)
         self.hyper_param_df = pd.DataFrame(HYPER_PARAM)
         self.semantic_df = pd.DataFrame(SENANTICS)
@@ -284,15 +286,15 @@ class ModelDescription:
 
         # model_df = self.bench_df[self.bench_df['dataset'] == 'cora'][['dataset', 'model']].copy(deep=True)
 
-        decoder = HashDecoder(GNN_LIST, GNN_LIST_PROTEINS)
+        # decoder = HashDecoder(GNN_LIST, GNN_LIST_PROTEINS)
 
         # print('non protein model code:', non_protein_model_df['model'].unique()[:10])
 
-        non_protein_model_df['struct_topology'] = non_protein_model_df['model'].apply(lambda x: decoder.decode_hash(x, False)[0])
-        non_protein_model_df['struct_1'] = non_protein_model_df['model'].apply(lambda x: decoder.decode_hash(x, False)[1][0])
-        non_protein_model_df['struct_2'] = non_protein_model_df['model'].apply(lambda x: decoder.decode_hash(x, False)[1][1])
-        non_protein_model_df['struct_3'] = non_protein_model_df['model'].apply(lambda x: decoder.decode_hash(x, False)[1][2])
-        non_protein_model_df['struct_4'] = non_protein_model_df['model'].apply(lambda x: decoder.decode_hash(x, False)[1][3])
+        non_protein_model_df['struct_topology'] = non_protein_model_df['model'].apply(lambda x: self.decoder.decode_hash(x, False)[0])
+        non_protein_model_df['struct_1'] = non_protein_model_df['model'].apply(lambda x: self.decoder.decode_hash(x, False)[1][0])
+        non_protein_model_df['struct_2'] = non_protein_model_df['model'].apply(lambda x: self.decoder.decode_hash(x, False)[1][1])
+        non_protein_model_df['struct_3'] = non_protein_model_df['model'].apply(lambda x: self.decoder.decode_hash(x, False)[1][2])
+        non_protein_model_df['struct_4'] = non_protein_model_df['model'].apply(lambda x: self.decoder.decode_hash(x, False)[1][3])
 
         # print('protein model code:', protein_model_df['model'].unique()[:10])
 

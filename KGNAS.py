@@ -10,6 +10,7 @@ from .dataset.DatasetDescription import DatasetDescription
 from .model.ModelDescription import ModelDescription
 from nas_bench_graph import Arch
 from .utils.utils import *
+from .model.HashDecoder import HashDecoder
 
 BENCH_DATASET_NAME = ['cora', 'citeseer', 'pubmed', 'cs', 'physics', 'photo', 'computers', 'arxiv', 'proteins']
 
@@ -115,103 +116,173 @@ class KGNAS:
 
         return dataset_similarities_df
 
-    def calculate_model_similarity(self, source_model_data: pd.Series, candidate_df: pd.DataFrame, sim_metric='gower', sim_weights=[1, 1, 4]):
+    # def calculate_model_similarity(self, source_model_data: pd.Series, candidate_df: pd.DataFrame, sim_metric='gower', sim_weights=[1, 1, 4]):
+    #     """
+    #     Calculates the similarity between a source model and a dataframe of candidate models.
+    #     The similarity is calculated based on the hyperparameters, structure, and performance of the models.
+    #     Three types of similarities are calculated separately and then combined using the weights provided.
+
+    #     Args:
+    #         source_model_data (pd.Series): The data of the source model.
+    #         candidate_df (pd.DataFrame): The dataframe containing the candidate models.
+    #         sim_metric (str, optional): The similarity metric to use. Defaults to 'gower'.
+    #         sim_weights (list, optional): The weights for the different similarity components. Defaults to [1, 1, 4].
+
+    #     Returns:
+    #         pd.DataFrame: The candidate dataframe with additional similarity information.
+    #     """
+    #     # print(source_model_data)
+    #     source_model_data = pd.Series(source_model_data)
+    #     source_model_data['model'] = 'source_model'
+
+    #     # Integrate the data together
+    #     temp_df = candidate_df.copy(deep=True)
+    #     temp_df = pd.concat([temp_df, source_model_data.to_frame().T])
+
+    #     # Process the numerical data and categorical data
+    #     for col in temp_df.columns:
+    #         if col in ['model', 'dataset'] + self.model_desc.relation_names['hardware']:
+    #             continue
+            
+    #         if temp_df[col].dtype == 'object':
+    #             temp_df[col] = (temp_df[col] == source_model_data[col]).astype(float)
+    #         else:
+    #             temp_df[col] = self.process_numerical_data(temp_df[col])
+
+    #     temp_df.set_index('model', inplace=True)
+
+    #     # Calculate the similarity
+    #     source_hyper_param_vector = temp_df.loc['source_model'][self.model_desc.relation_names['hyper_param']].astype(float)
+    #     source_structure_vector = temp_df.loc['source_model'][self.model_desc.relation_names['structure']].astype(float)
+        
+    #     temp_df['hyper_param_similarity'] = 1
+    #     temp_df['struct_similarity'] = 1
+    #     for model in temp_df.index:
+    #         candidate_hyper_param_vector = temp_df.loc[model][self.model_desc.relation_names['hyper_param']].astype(float)
+    #         temp_df.loc[model, 'hyper_param_similarity'] = self.pairwise_similarity(source_hyper_param_vector, candidate_hyper_param_vector, sim_metric=sim_metric)
+            
+    #         candidate_structure_vector = temp_df.loc[model][self.model_desc.relation_names['structure']].astype(float)
+    #         temp_df.loc[model, 'struct_similarity'] = self.pairwise_similarity(source_structure_vector, candidate_structure_vector, sim_metric=sim_metric)
+
+    #     temp_df.drop('source_model', axis=0, inplace=True)
+
+    #     temp_df['perf_similarity'] = 1
+
+    #     models = temp_df.index
+    #     temp_df['structure_id'] = [model[1:] for model in models]
+    #     temp_perf_df = self.model_desc.hyper_relation_info.copy(deep=True)
+    #     temp_perf_df['target_entity'] = temp_perf_df['target_entity'].apply(lambda x: x[1:])
+    #     perf_df = temp_perf_df[['target_entity', 'source_entity', 'perf']].pivot(index='target_entity', columns='source_entity', values='perf')
+    #     perf_df.reset_index(inplace=True)
+    #     perf_df.set_index('target_entity', inplace=True)
+    #     perf_df.fillna(0, inplace=True)
+
+    #     struct_list = [int(i) for i in source_model_data['has_struct_topology'][1:-1].split(',')]
+    #     layer_list = [source_model_data[f'has_struct_{i}'] for i in range(1, 5)]
+    #     source_struct_id = str(Arch(struct_list, layer_list).valid_hash())
+    #     for model in temp_df.index:
+    #         temp_df.loc[model, 'perf_similarity'] = self.pairwise_similarity(perf_df.loc[temp_df.loc[model, 'structure_id']], perf_df.loc[source_struct_id], sim_metric=sim_metric)
+
+    #     # Averate the similarities as the final similarity
+    #     temp_df['similarity'] = (sim_weights[0] * temp_df['hyper_param_similarity'] + sim_weights[1] * temp_df['struct_similarity'] + sim_weights[2] * temp_df['perf_similarity']) / sum(sim_weights)
+
+    #     temp_df.reset_index(inplace=True)
+    #     candidate_df['similarity'] = temp_df['similarity'].copy(deep=True)
+    #     candidate_df['hyper_param_similarity'] = temp_df['hyper_param_similarity'].copy(deep=True)
+    #     candidate_df['struct_similarity'] = temp_df['struct_similarity'].copy(deep=True)
+    #     candidate_df['perf_similarity'] = temp_df['perf_similarity'].copy(deep=True)
+
+    #     # Return only the necessary information
+    #     return candidate_df
+
+    def get_similar_model(self, source_dataset, source_model, top_k_dataset, top_k_model, sim_metric='gower', sim_weights=[1, 4]):
         """
         Calculates the similarity between a source model and a dataframe of candidate models.
         The similarity is calculated based on the hyperparameters, structure, and performance of the models.
         Three types of similarities are calculated separately and then combined using the weights provided.
 
         Args:
-            source_model_data (pd.Series): The data of the source model.
-            candidate_df (pd.DataFrame): The dataframe containing the candidate models.
+            source_model: The hashed id of a source_model.
             sim_metric (str, optional): The similarity metric to use. Defaults to 'gower'.
             sim_weights (list, optional): The weights for the different similarity components. Defaults to [1, 1, 4].
 
         Returns:
             pd.DataFrame: The candidate dataframe with additional similarity information.
         """
-        # print(source_model_data)
-        source_model_data = pd.Series(source_model_data)
-        source_model_data['model'] = 'source_model'
 
-        # Integrate the data together
-        temp_df = candidate_df.copy(deep=True)
-        temp_df = pd.concat([temp_df, source_model_data.to_frame().T])
+        similar_dataset_df = self.get_similar_dataset(source_dataset, top_k=top_k_dataset, sim_metric='gower', include_target_dataset=False)
+        similar_datasets = similar_dataset_df['dataset'].to_list()
 
-        # Process the numerical data and categorical data
-        for col in temp_df.columns:
-            if col in ['model', 'dataset'] + self.model_desc.relation_names['hardware']:
-                continue
-            
-            if temp_df[col].dtype == 'object':
-                temp_df[col] = (temp_df[col] == source_model_data[col]).astype(float)
-            else:
-                temp_df[col] = self.process_numerical_data(temp_df[col])
+        model_similarity_df = self.model_desc.model_structure_df.copy(deep=True)
+        # model_similarity_df['model'] = model_similarity_df['model'].apply(lambda x: str(x))
+        model_similarity_df.set_index('model', inplace=True)
 
-        temp_df.set_index('model', inplace=True)
+        # print(model_similarity_df.head())
 
-        # Calculate the similarity
-        source_hyper_param_vector = temp_df.loc['source_model'][self.model_desc.relation_names['hyper_param']].astype(float)
-        source_structure_vector = temp_df.loc['source_model'][self.model_desc.relation_names['structure']].astype(float)
+        source_model_data = model_similarity_df.loc[source_model].copy(deep=True)
+
+        struct_columns = ['struct_topology', 'struct_1', 'struct_2', 'struct_3', 'struct_4']
+
+        for col in model_similarity_df.columns:
+            model_similarity_df[col] = (model_similarity_df[col] == source_model_data[col]).astype(float)
+
+        model_similarity_df['struct_similarity'] = 1
+        source_structure_vector = model_similarity_df.loc[source_model][struct_columns].astype(float)
+        for model in model_similarity_df.index:
+            candidate_structure_vector = model_similarity_df.loc[model][struct_columns].astype(float)
+            model_similarity_df.loc[model, 'struct_similarity'] = self.pairwise_similarity(source_structure_vector, candidate_structure_vector, sim_metric=sim_metric)
+
+        # print(model_similarity_df.head())
+
+        perf_similarity_df = self.model_desc.bench_df[self.model_desc.bench_df['dataset'].isin(similar_datasets)][['dataset', 'model', 'perf']].copy(deep=True)
+
+        perf_similarity_df = perf_similarity_df.pivot(index='model', columns='dataset', values='perf')
+        perf_similarity_df.reset_index(inplace=True)
+        perf_similarity_df.set_index('model', inplace=True)
+        perf_similarity_df.fillna(0, inplace=True)
+
+        model_similarity_df['perf_similarity'] = 1
+        for model in perf_similarity_df.index:
+            model_similarity_df.loc[model, 'perf_similarity'] = self.pairwise_similarity(perf_similarity_df.loc[model], perf_similarity_df.loc[source_model], sim_metric=sim_metric)
+
+        # print(model_similarity_df.head())
+
+        model_similarity_df['similarity'] = (sim_weights[0] * model_similarity_df['struct_similarity'] + sim_weights[1] * model_similarity_df['perf_similarity']) / sum(sim_weights)
+
+        model_similarity_df.sort_values(by='similarity', ascending=False, inplace=True)
+
+        model_similarity_df.drop(index=[source_model], inplace=True)
         
-        temp_df['hyper_param_similarity'] = 1
-        temp_df['struct_similarity'] = 1
-        for model in temp_df.index:
-            candidate_hyper_param_vector = temp_df.loc[model][self.model_desc.relation_names['hyper_param']].astype(float)
-            temp_df.loc[model, 'hyper_param_similarity'] = self.pairwise_similarity(source_hyper_param_vector, candidate_hyper_param_vector, sim_metric=sim_metric)
-            
-            candidate_structure_vector = temp_df.loc[model][self.model_desc.relation_names['structure']].astype(float)
-            temp_df.loc[model, 'struct_similarity'] = self.pairwise_similarity(source_structure_vector, candidate_structure_vector, sim_metric=sim_metric)
+        model_similarity_df = model_similarity_df.head(top_k_model)
+        model_similarity_df.reset_index(inplace=True)
+        model_similarity_df.drop(columns=struct_columns, inplace=True)
 
-        temp_df.drop('source_model', axis=0, inplace=True)
-
-        temp_df['perf_similarity'] = 1
-
-        models = temp_df.index
-        temp_df['structure_id'] = [model[1:] for model in models]
-        temp_perf_df = self.model_desc.hyper_relation_info.copy(deep=True)
-        temp_perf_df['target_entity'] = temp_perf_df['target_entity'].apply(lambda x: x[1:])
-        perf_df = temp_perf_df[['target_entity', 'source_entity', 'perf']].pivot(index='target_entity', columns='source_entity', values='perf')
-        perf_df.reset_index(inplace=True)
-        perf_df.set_index('target_entity', inplace=True)
-        perf_df.fillna(0, inplace=True)
-
-        struct_list = [int(i) for i in source_model_data['has_struct_topology'][1:-1].split(',')]
-        layer_list = [source_model_data[f'has_struct_{i}'] for i in range(1, 5)]
-        source_struct_id = str(Arch(struct_list, layer_list).valid_hash())
-        for model in temp_df.index:
-            temp_df.loc[model, 'perf_similarity'] = self.pairwise_similarity(perf_df.loc[temp_df.loc[model, 'structure_id']], perf_df.loc[source_struct_id], sim_metric=sim_metric)
-
-        # Averate the similarities as the final similarity
-        temp_df['similarity'] = (sim_weights[0] * temp_df['hyper_param_similarity'] + sim_weights[1] * temp_df['struct_similarity'] + sim_weights[2] * temp_df['perf_similarity']) / sum(sim_weights)
-
-        temp_df.reset_index(inplace=True)
-        candidate_df['similarity'] = temp_df['similarity'].copy(deep=True)
-        candidate_df['hyper_param_similarity'] = temp_df['hyper_param_similarity'].copy(deep=True)
-        candidate_df['struct_similarity'] = temp_df['struct_similarity'].copy(deep=True)
-        candidate_df['perf_similarity'] = temp_df['perf_similarity'].copy(deep=True)
-
-        # Return only the necessary information
-        return candidate_df
-
-
-    def get_similar_model(self, source_model_data: pd.Series, candidate_df: pd.DataFrame, topk=5, sim_metric='gower', sim_weights=[1, 1, 4]):
-        """
-        Retrieves the top-k similar models based on the similarity metric and weights.
-
-        Parameters:
-        - source_model_data (pd.Series): The data of the source model.
-        - candidate_df (pd.DataFrame): The DataFrame containing the candidate models.
-        - topk (int): The number of similar models to retrieve. Default is 5.
-        - sim_metric (str): The similarity metric to use. Default is 'gower'.
-        - sim_weights (list): The weights for each feature in the similarity calculation. Default is [1, 1, 4].
-
-        Returns:
-        - model_similarity_df (pd.DataFrame): The DataFrame containing the top-k similar models.
-        """
-        model_similarity_df = self.calculate_model_similarity(source_model_data, candidate_df, sim_metric=sim_metric, sim_weights=sim_weights)
+        model_similarity_df['has_struct_topology'] = model_similarity_df['model'].apply(lambda x: self.model_desc.decoder.decode_hash(x, False)[0])
+        model_similarity_df['has_struct_1'] = model_similarity_df['model'].apply(lambda x: self.model_desc.decoder.decode_hash(x, False)[1][0])
+        model_similarity_df['has_struct_2'] = model_similarity_df['model'].apply(lambda x: self.model_desc.decoder.decode_hash(x, False)[1][1])
+        model_similarity_df['has_struct_3'] = model_similarity_df['model'].apply(lambda x: self.model_desc.decoder.decode_hash(x, False)[1][2])
+        model_similarity_df['has_struct_4'] = model_similarity_df['model'].apply(lambda x: self.model_desc.decoder.decode_hash(x, False)[1][3])
         
-        return model_similarity_df.head(topk)
+        return model_similarity_df
+
+
+    # def get_similar_model(self, source_model_data: pd.Series, candidate_df: pd.DataFrame, topk=5, sim_metric='gower', sim_weights=[1, 1, 4]):
+    #     """
+    #     Retrieves the top-k similar models based on the similarity metric and weights.
+
+    #     Parameters:
+    #     - source_model_data (pd.Series): The data of the source model.
+    #     - candidate_df (pd.DataFrame): The DataFrame containing the candidate models.
+    #     - topk (int): The number of similar models to retrieve. Default is 5.
+    #     - sim_metric (str): The similarity metric to use. Default is 'gower'.
+    #     - sim_weights (list): The weights for each feature in the similarity calculation. Default is [1, 1, 4].
+
+    #     Returns:
+    #     - model_similarity_df (pd.DataFrame): The DataFrame containing the top-k similar models.
+    #     """
+    #     model_similarity_df = self.calculate_model_similarity(source_model_data, candidate_df, sim_metric=sim_metric, sim_weights=sim_weights)
+        
+    #     return model_similarity_df.head(topk)
     
     def get_similar_dataset(self, target_dataset_name, top_k=5, sim_metric='gower', include_target_dataset=True):
         """
@@ -291,7 +362,7 @@ class KGNAS:
             dataset_similarities_df = self.get_similar_dataset(target_dataset_name, top_k=top_k_dataset, sim_metric=sim_metric, include_target_dataset=include_target_dataset)
             
             similar_datasets = dataset_similarities_df['dataset'].to_list()
-            print(dataset_similarities_df)
+            # print(dataset_similarities_df)
             
             related_models = self.model_desc.hyper_relation_info.loc[self.model_desc.hyper_relation_info['source_entity'].isin(similar_datasets)].copy(deep=True)
 
@@ -301,6 +372,18 @@ class KGNAS:
             related_models['norm_target_entity'] = related_models['target_entity'].apply(lambda x: x[1:])
 
             recommend_model_df = related_models.groupby('norm_target_entity').agg({'weighted_score': 'mean'}).reset_index()
+
+            recommend_model_df = recommend_model_df.sort_values(by='weighted_score', ascending=False).head(top_k_model)
+
+            recommend_model_df = recommend_model_df.rename(columns={'norm_target_entity': 'model'})
+            recommend_model_df['model'] = recommend_model_df['model'].apply(lambda x: int(x))
+
+            recommend_model_df['has_struct_topology'] = recommend_model_df['model'].apply(lambda x: self.model_desc.decoder.decode_hash(x, False)[0])
+            recommend_model_df['has_struct_1'] = recommend_model_df['model'].apply(lambda x: self.model_desc.decoder.decode_hash(x, False)[1][0])
+            recommend_model_df['has_struct_2'] = recommend_model_df['model'].apply(lambda x: self.model_desc.decoder.decode_hash(x, False)[1][1])
+            recommend_model_df['has_struct_3'] = recommend_model_df['model'].apply(lambda x: self.model_desc.decoder.decode_hash(x, False)[1][2])
+            recommend_model_df['has_struct_4'] = recommend_model_df['model'].apply(lambda x: self.model_desc.decoder.decode_hash(x, False)[1][3])
+            # lk, op = self.model_desc.decoder.decode_hash(hash_value, use_proteins)
 
         return recommend_model_df
         

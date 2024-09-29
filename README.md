@@ -22,29 +22,23 @@ kgnas.process_method = 'normal'
 kgnas.bound_frac = 0.5
 kgnas.set_num_weight(1.0)
 
-# STEP1: The similar datasets of the given dataset can be obtained by calling get similar dataset, which gives the dataset names and the similarities.
-# The numerical features of the data set is standardized to [0, 1] and the categorical values are transformed into 0s and 1s, where 0 means different from the given dataset and 1 means same as the given dataset.
-# The similarity can be calculated by: cosine similarity (cosine), l1 distance (l1), l2 distance (l2), gower distance (gower). The recommended metric is gower distance, as it separately handles the numerical and categorical values.
-dataset_name = 'cora'
-top_k_dataset = 5
-sim_metric = 'gower'
+# recommend_model will analyze the all the models on top_k_datasets and recommend the top_k_model models that have the highest score.
+# Parameters to modify: top_k_dataset, top_k_model.
 
-print(kgnas.get_similar_dataset('cora', top_k=5, sim_metric='gower', include_target_dataset=False))
-
-# STEP5: The recommended models can be obtained directly by calling the following function, the top_k_dataset and top_k_model are the number of similar datasets and models to be recommended.
-# This returns a dataframe with the all the related information of the models and the datasets.
-# The NEW scroe_metric indicates the method of integrating the model performance and the dataset similarity into a score, the options are: 'avg' and 'mult'. The returned 'score' is a new column to rank the models.
-# In case the dataset is from the benchmark, you can set include_target_dataset=True to include the target dataset in the recommendation or set to False to exclude it.
-
-dataset_name = 'cora'
-top_k_dataset = 5
-top_k_model = 15
-sim_metric = 'gower'
-score_metric = 'avg'
-include_target_dataset = False
-
-print(kgnas.recommend_model('cora', 5, 15, 'gower', 'avg', include_target_dataset=False))
+print(kgnas.recommend_model('cora', top_k_dataset=5, top_k_model=5, sim_metric='gower', score_metric='avg', include_target_dataset=False, style='global'))
 # The topology is in the key: 'has_struct_topology', and the structure of each layer is in the keys: 'has_struct_1', 'has_struct_2', 'has_struct_3', 'has_struct_4'
+
+# An example returned dataframe is as follows.
+
+'''
+        model  weighted_score has_struct_topology has_struct_1 has_struct_2 has_struct_3 has_struct_4
+5435   30111        0.473730        [0, 0, 1, 2]          gat          gcn          gcn          gcn
+2979   21415        0.470791        [0, 0, 1, 1]          gcn         sage          gcn         arma
+5983   31311        0.470407        [0, 0, 1, 2]          gcn         cheb          gcn          gcn
+21134  78004        0.470293        [0, 1, 2, 2]         skip          gat          gat         sage
+5459   30141        0.469703        [0, 0, 1, 2]          gat          gcn         sage          gcn
+'''
+
 ```
 
 ### Recommend related models to a given model.
@@ -67,39 +61,25 @@ kgnas.process_method = 'normal'
 kgnas.bound_frac = 0.5
 kgnas.set_num_weight(1.0)
 
-# STEP1: The similar datasets of the given dataset can be obtained by calling get similar dataset, which gives the dataset names and the similarities.
-# The numerical features of the data set is standardized to [0, 1] and the categorical values are transformed into 0s and 1s, where 0 means different from the given dataset and 1 means same as the given dataset.
-# The similarity can be calculated by: cosine similarity (cosine), l1 distance (l1), l2 distance (l2), gower distance (gower). The recommended metric is gower distance, as it separately handles the numerical and categorical values.
-dataset_name = 'cora'
-top_k_dataset = 5
-sim_metric = 'gower'
+# Given the unseen dataset name ('cora') and the target model hashed index (10000), get_similar_model will use the structure features and the performance distribution on the top_k similar benchmark datasets to unseen dataset to recommend the top_k_model similar models.
 
-print(kgnas.get_similar_dataset('cora', top_k=5, sim_metric='gower', include_target_dataset=False))
+# sim_metric can be fixed to l2.
 
-# STEP5: The recommended models can be obtained directly by calling the following function, the top_k_dataset and top_k_model are the number of similar datasets and models to be recommended.
-# This returns a dataframe with the all the related information of the models and the datasets.
-# The NEW scroe_metric indicates the method of integrating the model performance and the dataset similarity into a score, the options are: 'avg' and 'mult'. The returned 'score' is a new column to rank the models.
-# In case the dataset is from the benchmark, you can set include_target_dataset=True to include the target dataset in the recommendation or set to False to exclude it.
-
-dataset_name = 'cora'
-top_k_dataset = 5
-top_k_model = 15
-sim_metric = 'gower'
-score_metric = 'avg'
-include_target_dataset = False
-
-candidate_df = kgnas.recommend_model('cora', top_k_dataset=3, top_k_model=5, sim_metric='gower', score_metric='avg', include_target_dataset=True)
-
-candidate_model = candidate_df.iloc[0]
-print(candidate_model)
-
-# STEP6: Get the similar models of the given model based on the candidate_df from the last step. To make the recommendation more effective, it is recommended to enlarge the candidate pool from the last step.
-# The similarity is calculated based on three parts: the structural similarity, the hyperparameters similarity and the model performance similarity, their weights are currently 1:1:4 towards the final similarity.
-similar_model_df = kgnas.get_similar_model(candidate_model, candidate_df, topk=5, sim_metric='l2', sim_weights=[1, 1, 4])
-
-print(similar_model_df.head())
+# sim_weights are the weights for the structural similarity and the performance similarity, by default is [structural, performance] = [1, 4].
 
 # The topology is in the key: 'has_struct_topology', and the structure of each layer is in the keys: 'has_struct_1', 'has_struct_2', 'has_struct_3', 'has_struct_4'
+
+print(kgnas.get_similar_model(source_dataset='cora', source_model=10000, top_k_dataset=2, top_k_model=10, sim_metric='l2', sim_weights=[1, 4]))
+
+# An examplar returned dataframe is as follows.
+
+'''
+   model  struct_similarity  perf_similarity  similarity has_struct_topology has_struct_1 has_struct_2 has_struct_3 has_struct_4
+0  11000                0.8         0.999995    0.959996        [0, 0, 0, 1]          gcn          gat          gat          gat
+1  30000                0.8         0.999984    0.959987        [0, 0, 1, 2]          gat          gat          gat          gat
+2  10010                0.8         0.999969    0.959975        [0, 0, 0, 1]          gat          gat          gcn          gat
+3  50000                0.8         0.999957    0.959966        [0, 1, 1, 1]          gat          gat          gat          gat
+'''
 
 ```
 

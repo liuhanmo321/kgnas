@@ -25,6 +25,8 @@ kgnas.set_num_weight(1.0)
 # recommend_model will analyze the all the models on top_k_datasets and recommend the top_k_model models that have the highest score.
 # Parameters to modify: top_k_dataset, top_k_model.
 
+print(kgnas.get_similar_dataset('cora', top_k=5, sim_metric='gower', include_target_dataset=False))
+
 print(kgnas.recommend_model('cora', top_k_dataset=5, top_k_model=5, sim_metric='gower', score_metric='avg', include_target_dataset=False, style='global'))
 # The topology is in the key: 'has_struct_topology', and the structure of each layer is in the keys: 'has_struct_1', 'has_struct_2', 'has_struct_3', 'has_struct_4'
 

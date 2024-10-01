@@ -674,15 +674,31 @@ class KGNAS:
             
             return similarity
 
-        target_vector = target_vector.to_numpy()
-        bench_vector = bench_vector.to_numpy()
+        if numerical_columns is not None:
+            target_vector = target_vector[numerical_columns].to_numpy()
+            bench_vector = bench_vector[numerical_columns].to_numpy()
+        else:
+            target_vector = target_vector.to_numpy()
+            bench_vector = bench_vector.to_numpy()
+
+        target_vector = target_vector.astype(np.float32)
+        bench_vector = bench_vector.astype(np.float32)
+        # print(target_vector, bench_vector)
 
         if sim_metric == 'cosine':
+            # if numerical_columns == None:
             return torch.nn.functional.cosine_similarity(torch.tensor(target_vector), torch.tensor(bench_vector), dim=0).item()
         if sim_metric == 'l2':
+            # if numerical_columns == None:
             return 1 - torch.nn.functional.mse_loss(torch.tensor(target_vector), torch.tensor(bench_vector)).item()
+            # else:
+            #     return 1 - torch.nn.functional.mse_loss(torch.tensor(target_vector[numerical_columns]), torch.tensor(bench_vector[numerical_columns]), p=2).item()
         if sim_metric == 'l1':
+            # if numerical_columns == None:
             return 1 - torch.nn.functional.l1_loss(torch.tensor(target_vector), torch.tensor(bench_vector)).item()
+            # else:
+            #     return 1 - torch.nn.functional.l1_loss(torch.tensor(target_vector[numerical_columns]), torch.tensor(bench_vector[numerical_columns])).item()
+            # return 1 - torch.nn.functional.l1_loss(torch.tensor(target_vector), torch.tensor(bench_vector)).item()
         
     def get_similarity_vector(self, source_dataset, target_dataset):
         source_vector = self.normalized_data_desc_df.loc[source_dataset]

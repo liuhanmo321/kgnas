@@ -50,7 +50,7 @@ class KGNAS:
 
         self.normalize = True
         self.standardize = False
-        self.activation = 'abs'
+        self.activation = 'gower'
         self.power = 1
         self.upper_bound = 1.0
         self.lower_bound = 0

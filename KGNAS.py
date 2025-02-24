@@ -283,8 +283,47 @@ class KGNAS:
     #     model_similarity_df = self.calculate_model_similarity(source_model_data, candidate_df, sim_metric=sim_metric, sim_weights=sim_weights)
         
     #     return model_similarity_df.head(topk)
+
+    def calculate_complex_dataset_similarity(self, target_dataset_name, sim_metric='gower', include_target_dataset=True):
+        # List of datasets
+        datasets = ['cora', 'citeseer', 'pubmed', 'photo', 'computers', 'physics', 'cs', 'arxiv']
+
+        # Initialize an empty DataFrame to store the similarity matrix
+        similarity_matrix = pd.DataFrame(index=datasets, columns=datasets)
+
+        # Compute the similarity for each pair of datasets
+        for dataset1 in datasets:
+            similarity_df = self.get_similar_dataset(dataset1, top_k=9, sim_metric=sim_metric, include_target_dataset=False)
+            for dataset2 in datasets:
+                if dataset1 == dataset2:
+                    similarity_matrix.loc[dataset1, dataset2] = 1.0  # Similarity with itself is 1
+                else:
+                    # similarity_df = kgnas.get_similar_dataset(dataset1, top_k=9, sim_metric='gower', include_target_dataset=False)
+                    similarity_value = similarity_df[similarity_df['dataset'] == dataset2]['dataset_similarity'].values[0]
+                    similarity_matrix.loc[dataset1, dataset2] = similarity_value
+        
+        # Create an empty graph
+        G = nx.DiGraph()
+
+        # Add nodes
+        for dataset in datasets:
+            G.add_node(dataset)
+
+        # Add edges with weights
+        for i, dataset1 in enumerate(datasets):
+            for j, dataset2 in enumerate(datasets):
+                if dataset1 != dataset2:
+                    weight = similarity_matrix.loc[dataset1, dataset2]
+                    G.add_edge(dataset1, dataset2, weight=weight)
+
+        # unseen_dataset = 'cora'
+        personalization = {dataset: 1 if dataset == target_dataset_name else 0 for dataset in datasets}
+
+        pagerank = nx.pagerank(G, personalization=personalization, alpha=0.9, max_iter=1000)
+
+        return pd.DataFrame(pagerank.items(), columns=['dataset', 'dataset_similarity']).sort_values(by='dataset_similarity', ascending=False)
     
-    def get_similar_dataset(self, target_dataset_name, top_k=5, sim_metric='gower', include_target_dataset=True):
+    def get_similar_dataset(self, target_dataset_name, top_k=5, sim_metric='gower', include_target_dataset=True, complex_alg=False):
         """
         Retrieves the most similar datasets to the target dataset based on a similarity metric.
 
@@ -298,6 +337,9 @@ class KGNAS:
             pandas.DataFrame: A DataFrame containing the most similar datasets.
         """
         dataset_similarities_df = self.calculate_dataset_similarity(target_dataset_name, sim_metric=sim_metric)
+
+        if complex_alg:
+            dataset_similarities_df = self.calculate_complex_dataset_similarity(target_dataset_name, sim_metric=sim_metric, include_target_dataset=include_target_dataset)
 
         if not include_target_dataset:
             k = min(top_k, dataset_similarities_df.shape[0] - 1)
